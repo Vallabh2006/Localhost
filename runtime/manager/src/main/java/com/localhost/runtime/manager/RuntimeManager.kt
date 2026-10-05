@@ -93,9 +93,9 @@ class RuntimeManager @Inject constructor(
 
         return listOf(
             RuntimePack(
-                id = "python-3.12-$abi",
+                id = "python-3.14-$abi",
                 runtime = RuntimeType.PYTHON,
-                version = "3.12.15",
+                version = "3.14.6",
                 abi = abi,
                 sha256 = "",
                 downloadUrl = pythonUrl,
@@ -220,17 +220,18 @@ class RuntimeManager @Inject constructor(
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
 
         return when (runtime) {
-            RuntimeType.PYTHON -> mapOf(
-                "PATH" to "$binPath:$targetDir/usr/bin:$targetDir:$nativeLibDir:$currentPath",
-                "PYTHONHOME" to if (File(targetDir, "usr").exists()) "$targetDir/usr" else targetDir,
-                "PYTHONPATH" to "$libPath/python3.14:$libPath/python3.14/site-packages:$libPath/python3.12:$libPath/python3.12/site-packages:$targetDir/usr/lib/python3.14:$targetDir/usr/lib/python3.14/site-packages",
-                "LD_LIBRARY_PATH" to "$libPath:$targetDir/usr/lib:$nativeLibDir",
-                "SSL_CERT_FILE" to "$targetDir/etc/tls/cert.pem",
-                "PYTHONUNBUFFERED" to "1"
-            )
+            RuntimeType.PYTHON -> {
+                val sitePackages = "$libPath/python3.14/site-packages:$libPath/python3.12/site-packages:$libPath/python3/site-packages"
+                mapOf(
+                    "PATH" to "$binPath:$targetDir:$nativeLibDir:$currentPath",
+                    "PYTHONHOME" to targetDir,
+                    "PYTHONPATH" to sitePackages,
+                    "LD_LIBRARY_PATH" to "$libPath:$nativeLibDir"
+                )
+            }
             RuntimeType.NODEJS -> mapOf(
                 "PATH" to "$binPath:$targetDir:$nativeLibDir:$currentPath",
-                "NODE_ENV" to "development",
+                "NODE_PATH" to "$targetDir/lib/node_modules",
                 "LD_LIBRARY_PATH" to "$libPath:$nativeLibDir"
             )
             RuntimeType.PHP -> mapOf(
@@ -337,6 +338,20 @@ class RuntimeManager @Inject constructor(
                         "https://packages.termux.dev/apt/termux-main/pool/main/p/python-pycryptodomex/python-pycryptodomex_3.24.0_${arch}.deb"
                     )
 
+                    val dpkgDeb = File(targetDir, "bin/dpkg-deb")
+                    if (dpkgDeb.exists()) {
+                        try {
+                            dpkgDeb.setReadable(true, false)
+                            dpkgDeb.setExecutable(true, false)
+                            Os.chmod(dpkgDeb.absolutePath, 493)
+                        } catch (_: Exception) {}
+                    }
+
+                    val envMap = mutableMapOf(
+                        "PATH" to "${File(targetDir, "bin").absolutePath}:${System.getenv("PATH") ?: "/system/bin"}",
+                        "LD_LIBRARY_PATH" to File(targetDir, "lib").absolutePath
+                    )
+
                     debUrls.forEach { debUrl ->
                         try {
                             val req = Request.Builder().url(debUrl).build()
@@ -348,10 +363,35 @@ class RuntimeManager @Inject constructor(
                                         input.copyTo(output)
                                     }
                                 }
-                                FileUtils.extractDeb(tempDeb, targetDir)
+                                if (dpkgDeb.exists()) {
+                                    val pb = ProcessBuilder(dpkgDeb.absolutePath, "-x", tempDeb.absolutePath, targetDir.absolutePath)
+                                    pb.directory(targetDir)
+                                    pb.environment().putAll(envMap)
+                                    val proc = pb.start()
+                                    proc.waitFor()
+                                } else {
+                                    FileUtils.extractDeb(tempDeb, targetDir)
+                                }
                                 tempDeb.delete()
                             }
                         } catch (_: Exception) {}
+                    }
+
+                    val termuxUsr = File(targetDir, "data/data/com.termux/files/usr")
+                    if (termuxUsr.exists() && termuxUsr.isDirectory) {
+                        termuxUsr.walkTopDown().forEach { file ->
+                            val rel = file.relativeTo(termuxUsr).path
+                            if (rel.isNotEmpty()) {
+                                val dest = File(targetDir, rel)
+                                if (file.isDirectory) {
+                                    dest.mkdirs()
+                                } else {
+                                    dest.parentFile?.mkdirs()
+                                    file.copyTo(dest, overwrite = true)
+                                }
+                            }
+                        }
+                        File(targetDir, "data").deleteRecursively()
                     }
 
                     // Create symlinks
