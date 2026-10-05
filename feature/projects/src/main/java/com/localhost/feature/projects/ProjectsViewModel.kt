@@ -393,14 +393,19 @@ class ProjectsViewModel @Inject constructor(
                 return@launch
             }
 
-            val projectSitePackages = File(workDir, ".venv/lib/python/site-packages").apply { mkdirs() }
+            val projectVenv = File(workDir, ".venv").apply { mkdirs() }
+            val wheelsDir = File(File(execPath).parentFile?.parentFile, "wheels")
             val runtimeProvided = setOf("audioop", "audioop-lts", "cryptography", "pillow", "pil", "psycopg2", "psycopg2-binary", "regex", "cffi", "pycparser")
             val filteredLines = validLines.filter { line ->
                 val pkgName = line.split(Regex("[=<>~! ]"))[0].trim().lowercase()
                 !runtimeProvided.contains(pkgName)
             }
             val packagesToInstall = if (filteredLines.isNotEmpty()) filteredLines else validLines
-            val cmd = listOf(execPath, "-m", "pip", "install", "--target", projectSitePackages.absolutePath, "--prefer-binary") + packagesToInstall
+            val cmd = mutableListOf(execPath, "-m", "pip", "install", "--prefix", projectVenv.absolutePath, "--prefer-binary")
+            if (wheelsDir.exists()) {
+                cmd.addAll(listOf("--find-links", wheelsDir.absolutePath))
+            }
+            cmd.addAll(packagesToInstall)
 
             try {
                 withContext(Dispatchers.IO) {
@@ -468,9 +473,17 @@ class ProjectsViewModel @Inject constructor(
                 return@launch
             }
 
-            val projectSitePackages = File(workDir, ".venv/lib/python/site-packages").apply { mkdirs() }
+            val projectVenv = File(workDir, ".venv").apply { mkdirs() }
+            val wheelsDir = File(File(execPath).parentFile?.parentFile, "wheels")
             val cmd = when (project.runtime) {
-                RuntimeType.PYTHON -> listOf(execPath, "-m", "pip", "install", "--target", projectSitePackages.absolutePath, "--prefer-binary", packageName.trim())
+                RuntimeType.PYTHON -> {
+                    val baseCmd = mutableListOf(execPath, "-m", "pip", "install", "--prefix", projectVenv.absolutePath, "--prefer-binary")
+                    if (wheelsDir.exists()) {
+                        baseCmd.addAll(listOf("--find-links", wheelsDir.absolutePath))
+                    }
+                    baseCmd.add(packageName.trim())
+                    baseCmd
+                }
                 RuntimeType.NODEJS -> {
                     val npmPath = File(File(execPath).parentFile, "npm").takeIf { it.exists() }?.absolutePath ?: "npm"
                     if (isCustom) listOf(npmPath, "install", packageName.trim())

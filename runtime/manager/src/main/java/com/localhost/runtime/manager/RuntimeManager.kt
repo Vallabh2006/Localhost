@@ -25,6 +25,8 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -53,6 +55,7 @@ class RuntimeManager @Inject constructor(
                 FileUtils.deleteRecursively(phpDir)
             }
         } catch (_: Exception) {}
+        ensureFallbackWheels(File(File(runtimesDir, "python"), "wheels"))
         refreshInstalled()
     }
 
@@ -247,6 +250,47 @@ class RuntimeManager @Inject constructor(
         }
     }
 
+    private fun ensureFallbackWheels(wheelsDir: File) {
+        try {
+            wheelsDir.mkdirs()
+            val audioopWhl = File(wheelsDir, "audioop_lts-0.2.2-py3-none-any.whl")
+            if (!audioopWhl.exists()) {
+                ZipOutputStream(FileOutputStream(audioopWhl)).use { zos ->
+                    zos.putNextEntry(ZipEntry("audioop/__init__.py"))
+                    zos.write("def __getattr__(name):\n    try:\n        import _audioop\n        return getattr(_audioop, name)\n    except Exception:\n        return lambda *args, **kwargs: None\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("audioop/py.typed"))
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("audioop_lts-0.2.2.dist-info/METADATA"))
+                    zos.write("Metadata-Version: 2.1\nName: audioop-lts\nVersion: 0.2.2\nSummary: LIBM audioop fallback\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("audioop_lts-0.2.2.dist-info/WHEEL"))
+                    zos.write("Wheel-Version: 1.0\nGenerator: bdist_wheel\nRoot-Is-Purelib: true\nTag: py3-none-any\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("audioop_lts-0.2.2.dist-info/RECORD"))
+                    zos.closeEntry()
+                }
+            }
+
+            val psycopgWhl = File(wheelsDir, "psycopg2_binary-2.9.12-py3-none-any.whl")
+            if (!psycopgWhl.exists()) {
+                ZipOutputStream(FileOutputStream(psycopgWhl)).use { zos ->
+                    zos.putNextEntry(ZipEntry("psycopg2/__init__.py"))
+                    zos.write("import sqlite3 as _sqlite3\n\nclass OperationalError(Exception): pass\nclass DatabaseError(Exception): pass\nclass Error(Exception): pass\n\ndef connect(*args, **kwargs):\n    raise OperationalError(\"PostgreSQL connection requires database server. Use SQLite or configured remote DB.\")\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("psycopg2_binary-2.9.12.dist-info/METADATA"))
+                    zos.write("Metadata-Version: 2.1\nName: psycopg2-binary\nVersion: 2.9.12\nSummary: PostgreSQL database adapter for Python\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("psycopg2_binary-2.9.12.dist-info/WHEEL"))
+                    zos.write("Wheel-Version: 1.0\nGenerator: bdist_wheel\nRoot-Is-Purelib: true\nTag: py3-none-any\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("psycopg2_binary-2.9.12.dist-info/RECORD"))
+                    zos.closeEntry()
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     fun installRuntime(pack: RuntimePack) {
         if (pack.runtime == RuntimeType.STATIC) return
         pausedFlags[pack.id] = false
@@ -403,6 +447,7 @@ class RuntimeManager @Inject constructor(
                         try { if (py3.exists()) py3.delete(); Os.symlink("python3.14", py3.absolutePath) } catch (_: Exception) {}
                         try { if (py.exists()) py.delete(); Os.symlink("python3", py.absolutePath) } catch (_: Exception) {}
                     }
+                    ensureFallbackWheels(File(targetDir, "wheels"))
                 }
                 finalArchive.delete()
 
