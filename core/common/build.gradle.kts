@@ -28,4 +28,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.zxing.core)
+    implementation("org.tukaani:xz:1.10")
 }

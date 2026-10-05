@@ -1,6 +1,7 @@
 package com.localhost.core.common
 
 import android.system.Os
+import org.tukaani.xz.XZInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -63,7 +64,10 @@ object FileUtils {
         ZipInputStream(inputStream, StandardCharsets.UTF_8).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
-                val cleanName = entry.name.replace('\\', '/').trimStart('/')
+                var cleanName = entry.name.replace('\\', '/').trimStart('/')
+                if (cleanName.startsWith("data/data/com.termux/files/usr/")) {
+                    cleanName = cleanName.removePrefix("data/data/com.termux/files/usr/")
+                }
                 if (isSafePath(cleanName)) {
                     val outFile = File(targetDir, cleanName)
                     if (entry.isDirectory) {
@@ -83,16 +87,21 @@ object FileUtils {
     fun extractArchive(archiveFile: File, targetDir: File) {
         if (!targetDir.exists()) targetDir.mkdirs()
         BufferedInputStream(FileInputStream(archiveFile)).use { bis ->
-            bis.mark(4)
-            val header = ByteArray(4)
+            bis.mark(8)
+            val header = ByteArray(8)
             val read = bis.read(header)
             bis.reset()
 
             val isGzip = read >= 2 && header[0] == 0x1F.toByte() && header[1] == 0x8B.toByte()
             val isZip = read >= 4 && header[0] == 0x50.toByte() && header[1] == 0x4B.toByte()
+            val isXz = read >= 6 && header[0] == 0xFD.toByte() && header[1] == 0x37.toByte() && header[2] == 0x7A.toByte() && header[3] == 0x58.toByte() && header[4] == 0x5A.toByte() && header[5] == 0x00.toByte()
 
             if (isZip) {
                 unzip(bis, targetDir)
+            } else if (isXz) {
+                XZInputStream(bis).use { xzis ->
+                    extractTarStream(xzis, targetDir)
+                }
             } else if (isGzip) {
                 GZIPInputStream(bis).use { gzis ->
                     extractTarStream(gzis, targetDir)
@@ -235,7 +244,11 @@ object FileUtils {
                 continue
             }
 
-            val cleanName = entryName.replace('\\', '/').trimStart('/')
+            var cleanName = entryName.replace('\\', '/').trimStart('/')
+            if (cleanName.startsWith("data/data/com.termux/files/usr/")) {
+                cleanName = cleanName.removePrefix("data/data/com.termux/files/usr/")
+            }
+
             if (!isSafePath(cleanName)) {
                 val pad = ((512 - (size % 512)) % 512).toInt()
                 if (size > 0) skipFully(inputStream, size)
@@ -250,7 +263,11 @@ object FileUtils {
                 try { Os.chmod(targetFile.absolutePath, 493) } catch (_: Exception) {}
             } else if (typeFlag == '2' || typeFlag == '1') {
                 targetFile.parentFile?.mkdirs()
-                deferredSymlinks.add(Pair(targetFile, linkName))
+                var cleanLink = linkName.replace('\\', '/').trimStart('/')
+                if (cleanLink.startsWith("data/data/com.termux/files/usr/")) {
+                    cleanLink = cleanLink.removePrefix("data/data/com.termux/files/usr/")
+                }
+                deferredSymlinks.add(Pair(targetFile, cleanLink))
             } else {
                 targetFile.parentFile?.mkdirs()
                 FileOutputStream(targetFile).use { fos ->
