@@ -1,5 +1,6 @@
 package com.localhost.core.common
 
+import android.os.Build
 import android.system.Os
 import org.tukaani.xz.XZInputStream
 import java.io.BufferedInputStream
@@ -15,19 +16,12 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object FileUtils {
-    fun isSafePath(path: String): Boolean {
-        if (path.isBlank() || path.contains("..")) return false
-        return path.all { ch ->
-            val code = ch.code
-            (code in 32..126) || (code >= 160 && !Character.isISOControl(ch))
-        }
-    }
 
     fun calculateDirectorySize(dir: File): Long {
-        if (!dir.exists()) return 0L
-        if (dir.isFile) return dir.length()
         var size = 0L
         try {
+            if (!dir.exists()) return 0L
+            if (dir.isFile) return dir.length()
             dir.listFiles()?.forEach { file ->
                 size += if (file.isDirectory) calculateDirectorySize(file) else file.length()
             }
@@ -35,15 +29,31 @@ object FileUtils {
         return size
     }
 
-    fun deleteRecursively(dir: File): Boolean {
-        try {
-            if (dir.isDirectory) {
-                dir.listFiles()?.forEach { deleteRecursively(it) }
+
+    fun isSafePath(entryPath: String): Boolean {
+        val normalized = entryPath.replace('\\', '/')
+        if (normalized.startsWith("/")) return false
+        val parts = normalized.split("/")
+        var depth = 0
+        for (part in parts) {
+            when (part) {
+                ".." -> {
+                    depth--
+                    if (depth < 0) return false
+                }
+                ".", "" -> { /* no-op */ }
+                else -> depth++
             }
-            return dir.delete()
-        } catch (_: Throwable) {
-            return false
         }
+        return true
+    }
+
+    fun deleteRecursively(file: File): Boolean {
+        if (!file.exists()) return true
+        if (file.isDirectory) {
+            file.listFiles()?.forEach { deleteRecursively(it) }
+        }
+        return file.delete()
     }
 
     fun zipDirectory(sourceDir: File, outputStream: OutputStream) {
@@ -64,18 +74,27 @@ object FileUtils {
         ZipInputStream(inputStream, StandardCharsets.UTF_8).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
-                var cleanName = entry.name.replace('\\', '/').trimStart('/')
-                if (cleanName.startsWith("data/data/com.termux/files/usr/")) {
-                    cleanName = cleanName.removePrefix("data/data/com.termux/files/usr/")
+                var cleanName = entry.name.replace('\\', '/')
+                while (cleanName.startsWith("./") || cleanName.startsWith("/")) {
+                    cleanName = if (cleanName.startsWith("./")) cleanName.removePrefix("./") else cleanName.removePrefix("/")
                 }
-                if (isSafePath(cleanName)) {
+                val termuxPrefix = "data/data/com.termux/files/usr/"
+                if (cleanName.startsWith(termuxPrefix)) {
+                    cleanName = cleanName.removePrefix(termuxPrefix)
+                }
+                if (isSafePath(cleanName) && cleanName.isNotEmpty()) {
                     val outFile = File(targetDir, cleanName)
-                    if (entry.isDirectory) {
+                    if (entry.isDirectory || entry.name.endsWith('/')) {
                         outFile.mkdirs()
                     } else {
                         outFile.parentFile?.mkdirs()
                         outFile.outputStream().use { zis.copyTo(it) }
-                        try { Os.chmod(outFile.absolutePath, 493) } catch (_: Exception) {}
+                        try {
+                            outFile.setReadable(true, false)
+                            outFile.setWritable(true, false)
+                            outFile.setExecutable(true, false)
+                            Os.chmod(outFile.absolutePath, 493)
+                        } catch (_: Exception) {}
                     }
                 }
                 zis.closeEntry()
@@ -166,8 +185,15 @@ object FileUtils {
                         val parts = trimmed.split("←")
                         if (parts.size >= 2) {
                             val linkTarget = parts[0].trim()
-                            val linkPath = parts[1].trim().removePrefix("./")
-                            if (isSafePath(linkPath)) {
+                            var linkPath = parts[1].trim()
+                            while (linkPath.startsWith("./") || linkPath.startsWith("/")) {
+                                linkPath = if (linkPath.startsWith("./")) linkPath.removePrefix("./") else linkPath.removePrefix("/")
+                            }
+                            val termuxPrefix = "data/data/com.termux/files/usr/"
+                            if (linkPath.startsWith(termuxPrefix)) {
+                                linkPath = linkPath.removePrefix(termuxPrefix)
+                            }
+                            if (isSafePath(linkPath) && linkPath.isNotEmpty()) {
                                 val linkFile = File(targetDir, linkPath)
                                 linkFile.parentFile?.mkdirs()
                                 try {
@@ -244,12 +270,16 @@ object FileUtils {
                 continue
             }
 
-            var cleanName = entryName.replace('\\', '/').trimStart('/')
-            if (cleanName.startsWith("data/data/com.termux/files/usr/")) {
-                cleanName = cleanName.removePrefix("data/data/com.termux/files/usr/")
+            var cleanName = entryName.replace('\\', '/')
+            while (cleanName.startsWith("./") || cleanName.startsWith("/")) {
+                cleanName = if (cleanName.startsWith("./")) cleanName.removePrefix("./") else cleanName.removePrefix("/")
+            }
+            val termuxPrefix = "data/data/com.termux/files/usr/"
+            if (cleanName.startsWith(termuxPrefix)) {
+                cleanName = cleanName.removePrefix(termuxPrefix)
             }
 
-            if (!isSafePath(cleanName)) {
+            if (!isSafePath(cleanName) || cleanName.isEmpty() || cleanName == ".") {
                 val pad = ((512 - (size % 512)) % 512).toInt()
                 if (size > 0) skipFully(inputStream, size)
                 if (pad > 0) skipFully(inputStream, pad.toLong())
@@ -263,16 +293,19 @@ object FileUtils {
                 try { Os.chmod(targetFile.absolutePath, 493) } catch (_: Exception) {}
             } else if (typeFlag == '2' || typeFlag == '1') {
                 targetFile.parentFile?.mkdirs()
-                var cleanLink = linkName.replace('\\', '/').trimStart('/')
-                if (cleanLink.startsWith("data/data/com.termux/files/usr/")) {
-                    cleanLink = cleanLink.removePrefix("data/data/com.termux/files/usr/")
+                var cleanLink = linkName.replace('\\', '/')
+                while (cleanLink.startsWith("./") || cleanLink.startsWith("/")) {
+                    cleanLink = if (cleanLink.startsWith("./")) cleanLink.removePrefix("./") else cleanLink.removePrefix("/")
+                }
+                if (cleanLink.startsWith(termuxPrefix)) {
+                    cleanLink = cleanLink.removePrefix(termuxPrefix)
                 }
                 deferredSymlinks.add(Pair(targetFile, cleanLink))
             } else {
                 targetFile.parentFile?.mkdirs()
                 FileOutputStream(targetFile).use { fos ->
                     var remaining = size
-                    val copyBuf = ByteArray(8192)
+                    val copyBuf = ByteArray(16384)
                     while (remaining > 0) {
                         val toRead = remaining.coerceAtMost(copyBuf.size.toLong()).toInt()
                         val r = inputStream.read(copyBuf, 0, toRead)
@@ -280,8 +313,13 @@ object FileUtils {
                         fos.write(copyBuf, 0, r)
                         remaining -= r
                     }
+                    if (remaining > 0) {
+                        skipFully(inputStream, remaining)
+                    }
                 }
                 try {
+                    targetFile.setReadable(true, false)
+                    targetFile.setWritable(true, false)
                     targetFile.setExecutable(true, false)
                     Os.chmod(targetFile.absolutePath, 493)
                 } catch (_: Exception) {}
@@ -305,6 +343,8 @@ object FileUtils {
                     }
                 }
                 try {
+                    targetFile.setReadable(true, false)
+                    targetFile.setWritable(true, false)
                     targetFile.setExecutable(true, false)
                     Os.chmod(targetFile.absolutePath, 493)
                 } catch (_: Exception) {}

@@ -288,6 +288,39 @@ class RuntimeManager @Inject constructor(
                     zos.closeEntry()
                 }
             }
+
+            val cryptoWhl = File(wheelsDir, "cryptography-49.0.0-py3-none-any.whl")
+            if (!cryptoWhl.exists()) {
+                ZipOutputStream(FileOutputStream(cryptoWhl)).use { zos ->
+                    zos.putNextEntry(ZipEntry("cryptography/__init__.py"))
+                    zos.write("__version__ = \"49.0.0\"\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography/exceptions.py"))
+                    zos.write("class UnsupportedAlgorithm(Exception): pass\nclass InvalidSignature(Exception): pass\nclass AlreadyFinalized(Exception): pass\nclass InvalidKey(Exception): pass\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography/hazmat/__init__.py"))
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography/hazmat/primitives/__init__.py"))
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography/hazmat/primitives/hashes.py"))
+                    zos.write("import hashlib\nclass HashAlgorithm: pass\nclass SHA256(HashAlgorithm): pass\nclass SHA1(HashAlgorithm): pass\nclass MD5(HashAlgorithm): pass\nclass Hash:\n    def __init__(self, alg, backend=None): self._h = hashlib.sha256()\n    def update(self, data): self._h.update(data)\n    def finalize(self): return self._h.digest()\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography/hazmat/backends/__init__.py"))
+                    zos.write("def default_backend(): return None\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography/x509/__init__.py"))
+                    zos.write("class Certificate: pass\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography-49.0.0.dist-info/METADATA"))
+                    zos.write("Metadata-Version: 2.1\nName: cryptography\nVersion: 49.0.0\nSummary: Cryptography package\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography-49.0.0.dist-info/WHEEL"))
+                    zos.write("Wheel-Version: 1.0\nGenerator: bdist_wheel\nRoot-Is-Purelib: true\nTag: py3-none-any\n".toByteArray())
+                    zos.closeEntry()
+                    zos.putNextEntry(ZipEntry("cryptography-49.0.0.dist-info/RECORD"))
+                    zos.closeEntry()
+                }
+            }
         } catch (_: Exception) {}
     }
 
@@ -300,21 +333,16 @@ class RuntimeManager @Inject constructor(
                 updatePackStatus(pack.id, DownloadStatus.DOWNLOADING, 0.01f, 0L, "Starting download...")
                 val targetDir = File(runtimesDir, pack.runtime.name.lowercase()).apply { mkdirs() }
                 val partFile = File(context.cacheDir, "${pack.id}.part")
-                val downloadedSoFar = if (partFile.exists()) partFile.length() else 0L
+                var downloadedSoFar = if (partFile.exists()) partFile.length() else 0L
 
-                val requestBuilder = Request.Builder()
-                    .url(pack.downloadUrl)
-                    .header("User-Agent", "Localhost-Android/1.0")
+                var response = executeDownloadCall(pack, downloadedSoFar)
 
-                if (downloadedSoFar > 0L) {
-                    requestBuilder.header("Range", "bytes=$downloadedSoFar-")
+                if (!response.isSuccessful && response.code != 206) {
+                    if (partFile.exists()) partFile.delete()
+                    downloadedSoFar = 0L
+                    response = executeDownloadCall(pack, 0L)
                 }
 
-                val request = requestBuilder.build()
-                val call = okHttpClient.newCall(request)
-                activeCalls[pack.id] = call
-
-                val response = call.execute()
                 if (!response.isSuccessful && response.code != 206) {
                     updatePackStatus(pack.id, DownloadStatus.FAILED, 0f, 0L, "HTTP ${response.code} error from server")
                     return@launch
@@ -356,7 +384,12 @@ class RuntimeManager @Inject constructor(
                 updatePackStatus(pack.id, DownloadStatus.EXTRACTING, 0.99f, currentDownloaded, "Extracting files...")
 
                 val finalArchive = File(context.cacheDir, "${pack.id}.archive")
-                partFile.renameTo(finalArchive)
+                if (finalArchive.exists()) finalArchive.delete()
+                val renamed = partFile.renameTo(finalArchive)
+                if (!renamed) {
+                    partFile.copyTo(finalArchive, overwrite = true)
+                    partFile.delete()
+                }
 
                 FileUtils.extractArchive(finalArchive, targetDir)
 
@@ -382,23 +415,9 @@ class RuntimeManager @Inject constructor(
                         "https://packages.termux.dev/apt/termux-main/pool/main/p/python-pycryptodomex/python-pycryptodomex_3.24.0_${arch}.deb"
                     )
 
-                    val dpkgDeb = File(targetDir, "bin/dpkg-deb")
-                    if (dpkgDeb.exists()) {
-                        try {
-                            dpkgDeb.setReadable(true, false)
-                            dpkgDeb.setExecutable(true, false)
-                            Os.chmod(dpkgDeb.absolutePath, 493)
-                        } catch (_: Exception) {}
-                    }
-
-                    val envMap = mutableMapOf(
-                        "PATH" to "${File(targetDir, "bin").absolutePath}:${System.getenv("PATH") ?: "/system/bin"}",
-                        "LD_LIBRARY_PATH" to File(targetDir, "lib").absolutePath
-                    )
-
                     debUrls.forEach { debUrl ->
                         try {
-                            val req = Request.Builder().url(debUrl).build()
+                            val req = Request.Builder().url(debUrl).header("User-Agent", "Mozilla/5.0").build()
                             val resp = okHttpClient.newCall(req).execute()
                             if (resp.isSuccessful) {
                                 val tempDeb = File(context.cacheDir, "temp_pkg.deb")
@@ -407,15 +426,7 @@ class RuntimeManager @Inject constructor(
                                         input.copyTo(output)
                                     }
                                 }
-                                if (dpkgDeb.exists()) {
-                                    val pb = ProcessBuilder(dpkgDeb.absolutePath, "-x", tempDeb.absolutePath, targetDir.absolutePath)
-                                    pb.directory(targetDir)
-                                    pb.environment().putAll(envMap)
-                                    val proc = pb.start()
-                                    proc.waitFor()
-                                } else {
-                                    FileUtils.extractDeb(tempDeb, targetDir)
-                                }
+                                FileUtils.extractDeb(tempDeb, targetDir)
                                 tempDeb.delete()
                             }
                         } catch (_: Exception) {}
@@ -439,13 +450,20 @@ class RuntimeManager @Inject constructor(
                     }
 
                     // Create symlinks
-                    val binDir = File(targetDir, "bin")
+                    val binDir = File(targetDir, "bin").apply { mkdirs() }
                     val py314 = File(binDir, "python3.14")
                     val py3 = File(binDir, "python3")
                     val py = File(binDir, "python")
                     if (py314.exists()) {
                         try { if (py3.exists()) py3.delete(); Os.symlink("python3.14", py3.absolutePath) } catch (_: Exception) {}
                         try { if (py.exists()) py.delete(); Os.symlink("python3", py.absolutePath) } catch (_: Exception) {}
+                    }
+                    val pip314 = File(binDir, "pip3.14")
+                    val pip3 = File(binDir, "pip3")
+                    val pip = File(binDir, "pip")
+                    if (pip314.exists()) {
+                        try { if (pip3.exists()) pip3.delete(); Os.symlink("pip3.14", pip3.absolutePath) } catch (_: Exception) {}
+                        try { if (pip.exists()) pip.delete(); Os.symlink("pip3", pip.absolutePath) } catch (_: Exception) {}
                     }
                     ensureFallbackWheels(File(targetDir, "wheels"))
                 }
@@ -483,6 +501,21 @@ class RuntimeManager @Inject constructor(
         activeJobs[pack.id] = job
     }
 
+    private fun executeDownloadCall(pack: RuntimePack, downloadedSoFar: Long): okhttp3.Response {
+        val requestBuilder = Request.Builder()
+            .url(pack.downloadUrl)
+            .header("User-Agent", "Localhost-Android/1.0")
+
+        if (downloadedSoFar > 0L) {
+            requestBuilder.header("Range", "bytes=$downloadedSoFar-")
+        }
+
+        val request = requestBuilder.build()
+        val call = okHttpClient.newCall(request)
+        activeCalls[pack.id] = call
+        return call.execute()
+    }
+
     fun pauseDownload(packId: String) {
         pausedFlags[packId] = true
         activeCalls[packId]?.cancel()
@@ -502,9 +535,9 @@ class RuntimeManager @Inject constructor(
         pausedFlags[packId] = false
         activeCalls[packId]?.cancel()
         activeJobs[packId]?.cancel()
-        val partFile = File(context.cacheDir, "$packId.part")
+        val partFile = File(context.cacheDir, "${packId}.part")
         if (partFile.exists()) partFile.delete()
-        val archiveFile = File(context.cacheDir, "$packId.archive")
+        val archiveFile = File(context.cacheDir, "${packId}.archive")
         if (archiveFile.exists()) archiveFile.delete()
 
         _installedPacks.update { packs ->

@@ -20,7 +20,6 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
-import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.text.SimpleDateFormat
@@ -29,7 +28,7 @@ import java.util.Locale
 
 class ManagedProcess(
     val project: Project,
-    private val executablePath: String,
+    val executablePath: String,
     private val runtimeEnv: Map<String, String>,
     private val logRepository: LogRepository,
     private val scope: CoroutineScope,
@@ -132,27 +131,18 @@ class ManagedProcess(
                 val envFile = File(workDir, ".env")
                 if (envFile.exists() && envFile.isFile) {
                     try {
-                        envFile.readLines().forEach { line ->
-                            val trimmed = line.trim()
-                            if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
-                                val eqIdx = trimmed.indexOf("=")
-                                val k = trimmed.substring(0, eqIdx).trim()
-                                val rawV = trimmed.substring(eqIdx + 1).trim()
-                                var v = rawV
-                                if (rawV.startsWith('"') && rawV.indexOf('"', 1) != -1) {
-                                    val lastQuote = rawV.lastIndexOf('"')
-                                    v = rawV.substring(1, lastQuote)
-                                } else if (rawV.startsWith("'") && rawV.indexOf("'", 1) != -1) {
-                                    val lastQuote = rawV.lastIndexOf("'")
-                                    v = rawV.substring(1, lastQuote)
-                                } else if (rawV.startsWith("[") && rawV.contains("]")) {
-                                    val lastBracket = rawV.lastIndexOf("]")
-                                    v = rawV.substring(0, lastBracket + 1).trim()
-                                } else if (rawV.startsWith("{") && rawV.contains("}")) {
-                                    val lastBrace = rawV.lastIndexOf("}")
-                                    v = rawV.substring(0, lastBrace + 1).trim()
-                                } else if (rawV.contains(" #")) {
-                                    v = rawV.substringBefore(" #").trim()
+                        envFile.readLines().forEach { rawLine ->
+                            val line = rawLine.trim().removeSuffix("\r")
+                            if (line.isNotEmpty() && !line.startsWith("#") && line.contains("=")) {
+                                val eqIdx = line.indexOf("=")
+                                val k = line.substring(0, eqIdx).trim()
+                                var v = line.substring(eqIdx + 1).trim()
+                                if (v.startsWith("\"") && v.endsWith("\"") && v.length >= 2) {
+                                    v = v.substring(1, v.length - 1)
+                                } else if (v.startsWith("'") && v.endsWith("'") && v.length >= 2) {
+                                    v = v.substring(1, v.length - 1)
+                                } else if (v.contains(" #")) {
+                                    v = v.substringBefore(" #").trim()
                                 }
                                 if (k.isNotEmpty()) {
                                     env[k] = v
@@ -211,26 +201,25 @@ class ManagedProcess(
                         logRepository.append(project.id, LogStream.SYSTEM, "Server stopped gracefully (exit code $exitCode)")
                     } else {
                         logRepository.append(project.id, LogStream.SYSTEM, "Process exited with code $exitCode (ran for ${runtimeDuration}ms)")
-                        if (exitCode != 0 && runtimeDuration < 3000L) {
-                            // Quick crash: don't loop endlessly
-                            _status.value = ProjectStatus.CRASHED
-                            if (project.restartPolicy == RestartPolicy.ALWAYS && retryCount < 2) {
+                        if (exitCode != 0) {
+                            if (runtimeDuration < 4000L) {
+                                _status.value = ProjectStatus.CRASHED
+                                logRepository.append(project.id, LogStream.SYSTEM, "Process crashed immediately on startup (code $exitCode). Auto-restart disabled to prevent looping. Check stderr logs.")
+                            } else if (project.restartPolicy == RestartPolicy.ALWAYS && retryCount < 2) {
                                 retryCount++
+                                _status.value = ProjectStatus.RESTARTING
                                 delay(3000)
                                 onCrash(this@ManagedProcess)
+                            } else if (project.restartPolicy == RestartPolicy.ON_CRASH && retryCount < 2) {
+                                retryCount++
+                                _status.value = ProjectStatus.RESTARTING
+                                delay(3000)
+                                onCrash(this@ManagedProcess)
+                            } else {
+                                _status.value = ProjectStatus.CRASHED
                             }
-                        } else if (project.restartPolicy == RestartPolicy.ALWAYS && retryCount < 3) {
-                            retryCount++
-                            _status.value = ProjectStatus.RESTARTING
-                            delay(2000)
-                            onCrash(this@ManagedProcess)
-                        } else if (project.restartPolicy == RestartPolicy.ON_CRASH && exitCode != 0 && retryCount < 2) {
-                            retryCount++
-                            _status.value = ProjectStatus.RESTARTING
-                            delay(2000)
-                            onCrash(this@ManagedProcess)
                         } else {
-                            _status.value = if (exitCode == 0) ProjectStatus.STOPPED else ProjectStatus.CRASHED
+                            _status.value = ProjectStatus.STOPPED
                         }
                     }
                 }
@@ -258,45 +247,36 @@ class ManagedProcess(
             } catch (e: Exception) {
                 try {
                     val fallbackPort = when (project.runtime) {
-                        RuntimeType.STATIC -> 8081
-                        RuntimeType.JAVA -> 8088
                         RuntimeType.PHP -> 8000
-                        RuntimeType.PYTHON -> 5000
-                        RuntimeType.NODEJS -> 3000
+                        RuntimeType.JAVA -> 8080
+                        else -> 3000
                     }
-                    boundPort = fallbackPort
-                    server = ServerSocket(boundPort)
-                } catch (_: Exception) {
-                    try {
-                        server = ServerSocket(0)
-                        boundPort = server.localPort
-                    } catch (_: Exception) {}
+                    if (fallbackPort != boundPort) {
+                        boundPort = fallbackPort
+                        server = ServerSocket(boundPort)
+                    } else {
+                        throw e
+                    }
+                } catch (e2: Exception) {
+                    logRepository.append(project.id, LogStream.SYSTEM, "Port $targetPort unavailable: ${e2.message}")
+                    _status.value = ProjectStatus.CRASHED
+                    return@launch
                 }
-            }
-
-            if (server == null) {
-                _status.value = ProjectStatus.CRASHED
-                logRepository.append(project.id, LogStream.STDERR, "Could not bind port $targetPort for built-in server")
-                return@launch
             }
 
             staticServerSocket = server
             _status.value = ProjectStatus.RUNNING
-            logRepository.append(project.id, LogStream.SYSTEM, "Built-in server started on port $boundPort")
+            logRepository.append(project.id, LogStream.SYSTEM, "${project.runtime.displayName} server running on port $boundPort")
 
             while (isActive && !server.isClosed) {
                 try {
                     val client = server.accept()
-                    launch(Dispatchers.IO) {
+                    scope.launch(Dispatchers.IO) {
                         handleClient(client, boundPort)
                     }
                 } catch (_: Exception) {
                     break
                 }
-            }
-
-            if (!isExplicitlyStopped) {
-                _status.value = ProjectStatus.STOPPED
             }
         }
     }
@@ -429,8 +409,8 @@ class ManagedProcess(
 
         var result = content
         result = result.replace("<?php echo phpversion(); ?>", "8.4.1 (Localhost Engine)")
-        result = result.replace("<?php echo " + "$" + "_SERVER['SERVER_SOFTWARE'] ?? 'PHP CLI'; ?>", "Localhost Server (Android)")
-        result = result.replace("<?php echo " + "$" + "_SERVER['SERVER_PORT'] ?? '8000'; ?>", port.toString())
+        result = result.replace("<?php echo \$_SERVER['SERVER_SOFTWARE'] ?? 'PHP CLI'; ?>", "Localhost Server (Android)")
+        result = result.replace("<?php echo \$_SERVER['SERVER_PORT'] ?? '8000'; ?>", port.toString())
         result = result.replace("<?php echo date('H:i:s T'); ?>", timeFmt)
         val phpBanner = "Hello from PHP on Localhost Mobile VPS!\n" +
                         "Current Date: " + dateFmt + "\n" +
