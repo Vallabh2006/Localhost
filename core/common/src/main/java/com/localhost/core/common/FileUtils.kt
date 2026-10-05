@@ -14,46 +14,65 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object FileUtils {
+    fun isSafePath(path: String): Boolean {
+        if (path.isBlank() || path.contains("..")) return false
+        return path.all { ch ->
+            val code = ch.code
+            (code in 32..126) || (code >= 160 && !Character.isISOControl(ch))
+        }
+    }
+
     fun calculateDirectorySize(dir: File): Long {
         if (!dir.exists()) return 0L
         if (dir.isFile) return dir.length()
         var size = 0L
-        dir.listFiles()?.forEach { file ->
-            size += if (file.isDirectory) calculateDirectorySize(file) else file.length()
-        }
+        try {
+            dir.listFiles()?.forEach { file ->
+                size += if (file.isDirectory) calculateDirectorySize(file) else file.length()
+            }
+        } catch (_: Throwable) {}
         return size
     }
 
     fun deleteRecursively(dir: File): Boolean {
-        if (dir.isDirectory) {
-            dir.listFiles()?.forEach { deleteRecursively(it) }
+        try {
+            if (dir.isDirectory) {
+                dir.listFiles()?.forEach { deleteRecursively(it) }
+            }
+            return dir.delete()
+        } catch (_: Throwable) {
+            return false
         }
-        return dir.delete()
     }
 
     fun zipDirectory(sourceDir: File, outputStream: OutputStream) {
         ZipOutputStream(outputStream).use { zos ->
             sourceDir.walkTopDown().filter { it.isFile }.forEach { file ->
                 val relativePath = file.relativeTo(sourceDir).path
-                zos.putNextEntry(ZipEntry(relativePath))
-                file.inputStream().use { it.copyTo(zos) }
-                zos.closeEntry()
+                if (isSafePath(relativePath)) {
+                    zos.putNextEntry(ZipEntry(relativePath))
+                    file.inputStream().use { it.copyTo(zos) }
+                    zos.closeEntry()
+                }
             }
         }
     }
 
     fun unzip(inputStream: InputStream, targetDir: File) {
         if (!targetDir.exists()) targetDir.mkdirs()
-        ZipInputStream(inputStream).use { zis ->
+        ZipInputStream(inputStream, StandardCharsets.UTF_8).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
-                val outFile = File(targetDir, entry.name)
-                if (entry.isDirectory) {
-                    outFile.mkdirs()
-                } else {
-                    outFile.parentFile?.mkdirs()
-                    outFile.outputStream().use { zis.copyTo(it) }
-                    try { Os.chmod(outFile.absolutePath, 493) } catch (_: Exception) {}
+                val cleanName = entry.name.replace('\\', '/').trimStart('/')
+                if (isSafePath(cleanName)) {
+                    val outFile = File(targetDir, cleanName)
+                    if (entry.isDirectory) {
+                        outFile.mkdirs()
+                    } else {
+                        outFile.parentFile?.mkdirs()
+                        outFile.outputStream().use { zis.copyTo(it) }
+                        try { Os.chmod(outFile.absolutePath, 493) } catch (_: Exception) {}
+                    }
                 }
                 zis.closeEntry()
                 entry = zis.nextEntry
@@ -120,28 +139,8 @@ object FileUtils {
                         }
                         extractArchive(tempArchive, targetDir)
                         tempArchive.delete()
-
-                        // Move termux usr hierarchy up to targetDir if present
-                        val usrDir = File(targetDir, "data/data/com.termux/files/usr")
-                        if (usrDir.exists() && usrDir.isDirectory) {
-                            usrDir.walkTopDown().forEach { file ->
-                                val rel = file.relativeTo(usrDir).path
-                                if (rel.isNotEmpty()) {
-                                    val dest = File(targetDir, rel)
-                                    if (file.isDirectory) {
-                                        dest.mkdirs()
-                                    } else {
-                                        dest.parentFile?.mkdirs()
-                                        file.copyTo(dest, overwrite = true)
-                                    }
-                                }
-                            }
-                            FileUtils.deleteRecursively(File(targetDir, "data"))
-                        }
-                        break
                     } else {
-                        val skipAmount = size + (size % 2)
-                        skipFully(fis, skipAmount)
+                        skipFully(fis, size + (size % 2))
                     }
                 }
             }
@@ -159,15 +158,17 @@ object FileUtils {
                         if (parts.size >= 2) {
                             val linkTarget = parts[0].trim()
                             val linkPath = parts[1].trim().removePrefix("./")
-                            val linkFile = File(targetDir, linkPath)
-                            linkFile.parentFile?.mkdirs()
-                            try {
-                                if (linkFile.exists()) linkFile.delete()
-                                Os.symlink(linkTarget, linkFile.absolutePath)
-                            } catch (_: Exception) {
-                                val targetCand = File(linkFile.parentFile, linkTarget)
-                                if (targetCand.exists()) {
-                                    targetCand.copyTo(linkFile, overwrite = true)
+                            if (isSafePath(linkPath)) {
+                                val linkFile = File(targetDir, linkPath)
+                                linkFile.parentFile?.mkdirs()
+                                try {
+                                    if (linkFile.exists()) linkFile.delete()
+                                    Os.symlink(linkTarget, linkFile.absolutePath)
+                                } catch (_: Exception) {
+                                    val targetCand = File(linkFile.parentFile, linkTarget)
+                                    if (targetCand.exists()) {
+                                        targetCand.copyTo(linkFile, overwrite = true)
+                                    }
                                 }
                             }
                         }
@@ -235,7 +236,7 @@ object FileUtils {
             }
 
             val cleanName = entryName.replace('\\', '/').trimStart('/')
-            if (cleanName.isEmpty() || cleanName.contains("..")) {
+            if (!isSafePath(cleanName)) {
                 val pad = ((512 - (size % 512)) % 512).toInt()
                 if (size > 0) skipFully(inputStream, size)
                 if (pad > 0) skipFully(inputStream, pad.toLong())
