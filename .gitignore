@@ -1,0 +1,60 @@
+# Built application and library binaries
+*.apk
+*.aar
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Gradle build cache and outputs
+.gradle/
+build/
+*/build/
+*/*/build/
+.kotlin/
+
+# Local configuration and environment
+local.properties
+.env
+.tmp/
+tmp/
+
+# Android Studio / IntelliJ IDEA / VS Code
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.navigation/
+.vscode/
+
+# Log and capture files
+*.log
+captures/
+.externalNativeBuild
+.cxx/
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Signing keystores
+*.jks
+*.keystore
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js dependencies and logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

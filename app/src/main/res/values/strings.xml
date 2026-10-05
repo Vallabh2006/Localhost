@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Localhost</string>
+    <string name="notification_channel_name">Localhost Server Service</string>
+    <string name="notification_channel_desc">Shows active status and background execution of hosted servers</string>
+</resources>

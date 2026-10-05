@@ -1,0 +1,3 @@
+-keep class io.ktor.** { *; }
+-keep class kotlinx.coroutines.** { *; }
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
