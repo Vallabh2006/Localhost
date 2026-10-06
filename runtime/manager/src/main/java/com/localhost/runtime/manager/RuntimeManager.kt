@@ -396,6 +396,8 @@ class RuntimeManager @Inject constructor(
                 if (pack.runtime == RuntimeType.PYTHON) {
                     val arch = getArchMapping(getDeviceAbi()).first
                     val debUrls = listOf(
+                        "https://packages.termux.dev/apt/termux-main/pool/main/liba/libandroid-support/libandroid-support_29-1_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/liba/libandroid-glob/libandroid-glob_0.6-3_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/p/python/python_3.14.6-1_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/p/python-pip/python-pip_26.2.1_all.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/libe/libexpat/libexpat_2.9.0_${arch}.deb",
@@ -403,6 +405,13 @@ class RuntimeManager @Inject constructor(
                         "https://packages.termux.dev/apt/termux-main/pool/main/libf/libffi/libffi_3.8.0_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/o/openssl/openssl_1%3A3.6.5_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/c/ca-certificates/ca-certificates_1%3A2026.09.25_all.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/z/zlib/zlib_1.3.2_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/r/readline/readline_8.3.6_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/n/ncurses/ncurses_6.6.20260307%2Breally6.5.20250830_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/libl/liblzma/liblzma_5.8.4_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/libi/libiconv/libiconv_1.19_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/libb/libbz2/libbz2_1.0.8-8_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/g/gdbm/gdbm_1.26-1_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/libp/libpq/libpq_18.6_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/libi/libimagequant/libimagequant_4.4.1_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/libx/libxcb/libxcb_1.17.0-1_${arch}.deb",
