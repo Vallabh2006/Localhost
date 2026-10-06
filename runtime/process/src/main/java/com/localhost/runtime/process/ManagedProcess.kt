@@ -98,7 +98,7 @@ class ManagedProcess(
                     }
                 }
 
-                val processBuilder = ProcessBuilder(commandParts)
+                val processBuilder = ProcessBuilder(commandParts.map { it.replace("\u0000", "").replace("\r", "").replace("\n", "").trim() }.filter { it.isNotBlank() })
                 processBuilder.directory(workDir)
 
                 val env = processBuilder.environment()
@@ -108,7 +108,6 @@ class ManagedProcess(
                 env["HOME"] = workDir.absolutePath
                 env["TMPDIR"] = File(workDir, ".tmp").apply { mkdirs() }.absolutePath
 
-                // Project-isolated Python virtual environment
                 if (project.runtime == RuntimeType.PYTHON) {
                     val projectVenv = File(workDir, ".venv")
                     val projectSitePackages = File(projectVenv, "lib/python/site-packages")
@@ -132,7 +131,6 @@ class ManagedProcess(
                     }
                 }
 
-                // Automatic .env loading for project
                 val envFile = File(workDir, ".env")
                 if (envFile.exists() && envFile.isFile) {
                     try {
@@ -157,7 +155,6 @@ class ManagedProcess(
                     } catch (_: Exception) {}
                 }
 
-                // Project custom environment variables override
                 project.envVars.forEach { ev ->
                     if (ev.key.isNotBlank()) {
                         env[ev.key] = ev.value

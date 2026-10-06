@@ -488,7 +488,6 @@ class RuntimeManager @Inject constructor(
                         File(targetDir, "data").deleteRecursively()
                     }
 
-                    // Create symlinks
                     val binDir = File(targetDir, "bin").apply { mkdirs() }
                     val py314 = File(binDir, "python3.14")
                     val py3 = File(binDir, "python3")

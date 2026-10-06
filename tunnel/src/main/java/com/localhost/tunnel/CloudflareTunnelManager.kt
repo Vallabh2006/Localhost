@@ -14,7 +14,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,6 +33,9 @@ class CloudflareTunnelManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var tunnelProcess: Process? = null
     private var logReaderJob: Job? = null
+    private var timeoutJob: Job? = null
+    private var isUserRequestedRunning = false
+    private var reconnectAttempts = 0
 
     private val _tunnelStatus = MutableStateFlow(TunnelStatus.DISCONNECTED)
     val tunnelStatus = _tunnelStatus.asStateFlow()
@@ -45,17 +47,34 @@ class CloudflareTunnelManager @Inject constructor(
     val errorMessage = _errorMessage.asStateFlow()
 
     private val cloudflaredFile: File
-        get() {
-            val binDir = File(context.filesDir, "bin").apply { mkdirs() }
-            return File(binDir, "cloudflared")
-        }
+        get() = File(context.filesDir, "cloudflared")
 
-    fun isBinaryInstalled(): Boolean {
+    private fun getSetsidPath(): String? {
+        return when {
+            File("/system/bin/setsid").exists() -> "/system/bin/setsid"
+            File("/bin/setsid").exists() -> "/bin/setsid"
+            else -> null
+        }
+    }
+
+    private fun buildDetachedCommand(vararg args: String): List<String> {
+        val setsid = getSetsidPath()
+        return if (setsid != null) {
+            listOf(setsid) + args.toList()
+        } else {
+            args.toList()
+        }
+    }
+
+    suspend fun isBinaryAvailable(): Boolean {
         return cloudflaredFile.exists() && cloudflaredFile.canExecute()
     }
 
     suspend fun ensureBinary(): Result<Unit> {
-        if (isBinaryInstalled()) return Result.success(Unit)
+        if (isBinaryAvailable()) {
+            return Result.success(Unit)
+        }
+
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         val arch = when {
             abi.contains("arm64") -> "arm64"
@@ -83,12 +102,24 @@ class CloudflareTunnelManager @Inject constructor(
         }
     }
 
-    fun startQuickTunnel(targetPort: Int = 8080) {
+    fun startQuickTunnel(targetPort: Int? = null) {
         if (_tunnelStatus.value == TunnelStatus.CONNECTED || _tunnelStatus.value == TunnelStatus.CONNECTING) return
         _tunnelStatus.value = TunnelStatus.CONNECTING
         _errorMessage.value = null
+        isUserRequestedRunning = true
+        reconnectAttempts = 0
 
         scope.launch {
+            val port = if (targetPort != null && targetPort > 0) {
+                targetPort
+            } else {
+                try {
+                    settingsRepository.getDashboardConfig().first().port
+                } catch (_: Exception) {
+                    8080
+                }
+            }
+
             val ensureRes = ensureBinary()
             if (ensureRes.isFailure) {
                 _tunnelStatus.value = TunnelStatus.ERROR
@@ -97,11 +128,11 @@ class CloudflareTunnelManager @Inject constructor(
             }
 
             try {
-                val command = listOf(
+                val command = buildDetachedCommand(
                     cloudflaredFile.absolutePath,
                     "tunnel",
                     "--url",
-                    "http://127.0.0.1:$targetPort",
+                    "http://127.0.0.1:$port",
                     "--no-autoupdate"
                 )
 
@@ -110,34 +141,56 @@ class CloudflareTunnelManager @Inject constructor(
                 val proc = pb.start()
                 tunnelProcess = proc
 
-                logReaderJob = launch {
-                    BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
-                        lines.forEach { line ->
-                            val urlMatch = Regex("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com").find(line)
-                            if (urlMatch != null) {
-                                _activeUrl.value = urlMatch.value
-                                _tunnelStatus.value = TunnelStatus.CONNECTED
-                            }
-                        }
+                timeoutJob?.cancel()
+                timeoutJob = launch {
+                    delay(45_000L)
+                    if (_tunnelStatus.value == TunnelStatus.CONNECTING) {
+                        _tunnelStatus.value = TunnelStatus.ERROR
+                        _errorMessage.value = "Tunnel connection timed out"
+                        try { proc.destroy() } catch (_: Throwable) {}
                     }
                 }
 
-                val exitCode = proc.waitFor()
-                if (_tunnelStatus.value == TunnelStatus.CONNECTED || _tunnelStatus.value == TunnelStatus.CONNECTING) {
+                logReaderJob?.cancel()
+                logReaderJob = launch {
+                    try {
+                        BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
+                            lines.forEach { line ->
+                                val urlMatch = Regex("""https://[a-zA-Z0-9-]+\.trycloudflare\.com""").find(line)
+                                if (urlMatch != null) {
+                                    timeoutJob?.cancel()
+                                    _activeUrl.value = urlMatch.value
+                                    _tunnelStatus.value = TunnelStatus.CONNECTED
+                                }
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
+
+                val exitCode = try { proc.waitFor() } catch (_: Throwable) { -1 }
+                timeoutJob?.cancel()
+                if (isUserRequestedRunning && reconnectAttempts < 3 && _tunnelStatus.value == TunnelStatus.CONNECTED) {
+                    reconnectAttempts++
+                    delay(2000L * reconnectAttempts)
+                    startQuickTunnel(port)
+                } else if (_tunnelStatus.value == TunnelStatus.CONNECTED || _tunnelStatus.value == TunnelStatus.CONNECTING) {
                     _tunnelStatus.value = TunnelStatus.DISCONNECTED
                     _activeUrl.value = ""
                 }
             } catch (e: Exception) {
+                timeoutJob?.cancel()
                 _tunnelStatus.value = TunnelStatus.ERROR
                 _errorMessage.value = e.message
             }
         }
     }
 
-    fun startNamedTunnel(token: String) {
+    fun startNamedTunnel(token: String, tunnelId: String? = null) {
         if (_tunnelStatus.value == TunnelStatus.CONNECTED || _tunnelStatus.value == TunnelStatus.CONNECTING) return
         _tunnelStatus.value = TunnelStatus.CONNECTING
         _errorMessage.value = null
+        isUserRequestedRunning = true
+        reconnectAttempts = 0
 
         scope.launch {
             val ensureRes = ensureBinary()
@@ -148,37 +201,63 @@ class CloudflareTunnelManager @Inject constructor(
             }
 
             try {
-                val command = listOf(
+                val args = mutableListOf(
                     cloudflaredFile.absolutePath,
                     "tunnel",
-                    "run",
-                    "--token",
-                    token
+                    "run"
                 )
+                if (token.isNotBlank()) {
+                    args.add("--token")
+                    args.add(token)
+                }
 
+                val command = buildDetachedCommand(*args.toTypedArray())
                 val pb = ProcessBuilder(command)
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
                 tunnelProcess = proc
 
-                logReaderJob = launch {
-                    BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
-                        lines.forEach { line ->
-                            if (line.contains("Registered tunnel connection", ignoreCase = true) ||
-                                line.contains("Connection", ignoreCase = true) && line.contains("registered", ignoreCase = true) ||
-                                line.contains("Connected to", ignoreCase = true)
-                            ) {
-                                _tunnelStatus.value = TunnelStatus.CONNECTED
-                            }
-                        }
+                timeoutJob?.cancel()
+                timeoutJob = launch {
+                    delay(45_000L)
+                    if (_tunnelStatus.value == TunnelStatus.CONNECTING) {
+                        _tunnelStatus.value = TunnelStatus.ERROR
+                        _errorMessage.value = "Named tunnel connection timed out"
+                        try { proc.destroy() } catch (_: Throwable) {}
                     }
                 }
 
+                logReaderJob?.cancel()
+                logReaderJob = launch {
+                    try {
+                        BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
+                            lines.forEach { line ->
+                                if (line.contains("Registered tunnel connection", ignoreCase = true) ||
+                                    (line.contains("Connection", ignoreCase = true) && line.contains("registered", ignoreCase = true)) ||
+                                    line.contains("Connected to", ignoreCase = true) ||
+                                    line.contains("Connection is ready", ignoreCase = true)
+                                ) {
+                                    timeoutJob?.cancel()
+                                    _tunnelStatus.value = TunnelStatus.CONNECTED
+                                }
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
+
                 launch {
-                    val exitCode = proc.waitFor()
-                    _tunnelStatus.value = TunnelStatus.DISCONNECTED
+                    val exitCode = try { proc.waitFor() } catch (_: Throwable) { -1 }
+                    timeoutJob?.cancel()
+                    if (isUserRequestedRunning && reconnectAttempts < 3 && _tunnelStatus.value == TunnelStatus.CONNECTED) {
+                        reconnectAttempts++
+                        delay(2000L * reconnectAttempts)
+                        startNamedTunnel(token, tunnelId)
+                    } else {
+                        _tunnelStatus.value = TunnelStatus.DISCONNECTED
+                    }
                 }
             } catch (e: Exception) {
+                timeoutJob?.cancel()
                 _tunnelStatus.value = TunnelStatus.ERROR
                 _errorMessage.value = e.message
             }
@@ -186,16 +265,28 @@ class CloudflareTunnelManager @Inject constructor(
     }
 
     fun stopTunnel() {
+        isUserRequestedRunning = false
+        reconnectAttempts = 0
         scope.launch {
-            logReaderJob?.cancel()
-            tunnelProcess?.destroy()
-            delay(1000)
-            if (tunnelProcess?.isAlive == true) {
-                tunnelProcess?.destroyForcibly()
+            try {
+                timeoutJob?.cancel()
+                logReaderJob?.cancel()
+                tunnelProcess?.let { proc ->
+                    try {
+                        proc.destroy()
+                    } catch (_: Throwable) {}
+                    delay(300)
+                    try {
+                        if (proc.isAlive) {
+                            proc.destroyForcibly()
+                        }
+                    } catch (_: Throwable) {}
+                }
+            } catch (_: Throwable) {} finally {
+                tunnelProcess = null
+                _tunnelStatus.value = TunnelStatus.DISCONNECTED
+                _activeUrl.value = ""
             }
-            tunnelProcess = null
-            _tunnelStatus.value = TunnelStatus.DISCONNECTED
-            _activeUrl.value = ""
         }
     }
 }

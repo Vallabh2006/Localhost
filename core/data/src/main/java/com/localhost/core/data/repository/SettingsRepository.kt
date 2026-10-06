@@ -27,6 +27,7 @@ class SettingsRepository @Inject constructor(
 ) {
     private object Keys {
         val WAKE_LOCK_ENABLED = booleanPreferencesKey("wake_lock_enabled")
+        val VPN_ENABLED = booleanPreferencesKey("vpn_enabled")
         val WIFI_LOCK_ENABLED = booleanPreferencesKey("wifi_lock_enabled")
         val WIFI_ONLY_MODE = booleanPreferencesKey("wifi_only_mode")
         val DASHBOARD_PORT = intPreferencesKey("dashboard_port")
@@ -40,12 +41,17 @@ class SettingsRepository @Inject constructor(
     }
 
     val wakeLockEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.WAKE_LOCK_ENABLED] ?: true }
+    val vpnEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.VPN_ENABLED] ?: false }
     val wifiLockEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.WIFI_LOCK_ENABLED] ?: true }
     val wifiOnlyMode: Flow<Boolean> = context.dataStore.data.map { it[Keys.WIFI_ONLY_MODE] ?: false }
     val onboardingCompleted: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_COMPLETED] ?: false }
 
     suspend fun setWakeLockEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.WAKE_LOCK_ENABLED] = enabled }
+    }
+
+    suspend fun setVpnEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.VPN_ENABLED] = enabled }
     }
 
     suspend fun setWifiLockEnabled(enabled: Boolean) {

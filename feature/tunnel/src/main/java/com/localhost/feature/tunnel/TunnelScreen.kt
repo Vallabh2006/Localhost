@@ -177,7 +177,7 @@ fun TunnelScreen(
                         }
                     } else {
                         Button(
-                            onClick = { viewModel.startQuickTunnel(8080) },
+                            onClick = { viewModel.startQuickTunnel() },
                             colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()

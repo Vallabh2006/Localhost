@@ -28,13 +28,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -46,9 +43,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -56,7 +50,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -75,7 +68,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.localhost.core.designsystem.theme.DarkBackground
@@ -88,12 +80,10 @@ import com.localhost.core.designsystem.theme.PrimaryAccentContainer
 import com.localhost.core.designsystem.theme.StatusGreen
 import com.localhost.core.designsystem.theme.StatusOrange
 import com.localhost.core.designsystem.theme.StatusRed
-import com.localhost.core.designsystem.theme.StatusYellow
 import com.localhost.core.designsystem.theme.TextMuted
 import com.localhost.core.designsystem.theme.TextOnAccent
 import com.localhost.core.designsystem.theme.TextPrimary
 import com.localhost.core.designsystem.theme.TextSecondary
-import com.localhost.core.model.DashboardConfig
 import com.localhost.core.model.DownloadStatus
 import com.localhost.core.model.RuntimePack
 import com.localhost.core.model.RuntimeType
@@ -104,7 +94,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel
 ) {
     val wakeLockActive by viewModel.wakeLock.collectAsState()
-    val dashboardConfig by viewModel.dashboardConfig.collectAsState()
+    val vpnActive by viewModel.vpnEnabled.collectAsState()
     val installedPacks by viewModel.installedPacks.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
@@ -115,8 +105,6 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     var isBatteryOptimized by remember { mutableStateOf(true) }
-    var newPasswordInput by remember { mutableStateOf("") }
-    var showPasswordDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -137,7 +125,7 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Settings & Admin", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = TextPrimary)
+                    Text("Settings", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = TextPrimary)
                 },
                 actions = {
                     IconButton(onClick = { showHelpDialog = true }) {
@@ -162,17 +150,18 @@ fun SettingsScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    AdminSection(
-                        onUpdatePassword = { showPasswordDialog = true }
-                    )
-
                     SystemSection(
                         context = context,
                         wakeLockActive = wakeLockActive,
+                        vpnActive = vpnActive,
                         isBatteryOptimized = isBatteryOptimized,
                         onToggleWakeLock = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.setWakeLock(it)
+                        },
+                        onToggleVpn = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.setVpnEnabled(it)
                         },
                         onRequestBattery = {
                             try {
@@ -186,8 +175,6 @@ fun SettingsScreen(
                             }
                         }
                     )
-
-                    SecurityHardeningSection()
                 }
 
                 Column(
@@ -213,17 +200,18 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                AdminSection(
-                    onUpdatePassword = { showPasswordDialog = true }
-                )
-
                 SystemSection(
                     context = context,
                     wakeLockActive = wakeLockActive,
+                    vpnActive = vpnActive,
                     isBatteryOptimized = isBatteryOptimized,
                     onToggleWakeLock = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         viewModel.setWakeLock(it)
+                    },
+                    onToggleVpn = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setVpnEnabled(it)
                     },
                     onRequestBattery = {
                         try {
@@ -238,8 +226,6 @@ fun SettingsScreen(
                     }
                 )
 
-                SecurityHardeningSection()
-
                 RuntimesSection(
                     installedPacks = installedPacks,
                     viewModel = viewModel
@@ -250,55 +236,6 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(72.dp))
             }
         }
-    }
-
-    if (showPasswordDialog) {
-        AlertDialog(
-            onDismissRequest = { showPasswordDialog = false },
-            containerColor = DarkSurfaceElevated,
-            title = { Text("Update Dashboard Password", fontWeight = FontWeight.Bold, color = TextPrimary) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Set a secure access password for web dashboard and remote admin endpoints.", color = TextSecondary, fontSize = 13.sp)
-                    OutlinedTextField(
-                        value = newPasswordInput,
-                        onValueChange = { newPasswordInput = it },
-                        placeholder = { Text("New password (min 6 chars)", color = TextMuted) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = PrimaryAccent,
-                            unfocusedBorderColor = DarkBorderSubtle,
-                            cursorColor = PrimaryAccent,
-                            focusedContainerColor = DarkSurface,
-                            unfocusedContainerColor = DarkSurface
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (newPasswordInput.length >= 6) {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.saveDashboardConfig(dashboardConfig, newPasswordInput)
-                            newPasswordInput = ""
-                            showPasswordDialog = false
-                        }
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = PrimaryAccent)
-                ) {
-                    Text("Save", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPasswordDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
-                }
-            }
-        )
     }
 
     if (showHelpDialog) {
@@ -323,10 +260,9 @@ fun SettingsScreen(
                     HelpCmdItem("curl <url>", "Make HTTP requests directly from phone shell")
 
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Security & Networking", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
+                    Text("Networking & Tunnels", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
                     Text("- Cloudflare Tunnels: Create public URLs for your local port without opening router ports.", color = TextSecondary, fontSize = 12.sp)
-                    Text("- Rate Limiter: Blocks abusive request bursts automatically (120 req/min per IP).", color = TextSecondary, fontSize = 12.sp)
-                    Text("- Host Header Verification: Blocks DNS rebinding attacks.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- VPN Mode: Enable or disable VPN tunnel routing compatibility.", color = TextSecondary, fontSize = 12.sp)
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Background Survival", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
@@ -347,51 +283,13 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun AdminSection(
-    onUpdatePassword: () -> Unit
-) {
-    Text("Dashboard Administration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = BorderStroke(1.dp, DarkBorder)
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.VpnKey, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Admin Password", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                }
-                OutlinedButton(
-                    onClick = onUpdatePassword,
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, DarkBorderSubtle)
-                ) {
-                    Text("Change", color = PrimaryAccent, fontSize = 12.sp)
-                }
-            }
-
-            Text(
-                "Protects the web dashboard (http://127.0.0.1:8080/dashboard) against unauthorized requests on your local network.",
-                color = TextSecondary,
-                fontSize = 12.sp
-            )
-        }
-    }
-}
-
-@Composable
 private fun SystemSection(
     context: Context,
     wakeLockActive: Boolean,
+    vpnActive: Boolean,
     isBatteryOptimized: Boolean,
     onToggleWakeLock: (Boolean) -> Unit,
+    onToggleVpn: (Boolean) -> Unit,
     onRequestBattery: () -> Unit
 ) {
     Text("System & Performance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -418,6 +316,31 @@ private fun SystemSection(
                 Switch(
                     checked = wakeLockActive,
                     onCheckedChange = onToggleWakeLock,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = TextOnAccent,
+                        checkedTrackColor = PrimaryAccent,
+                        uncheckedThumbColor = TextMuted,
+                        uncheckedTrackColor = DarkSurfaceElevated
+                    )
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.VpnKey, contentDescription = null, tint = if (vpnActive) StatusGreen else TextMuted, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("VPN Mode", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        Text("Allow networking and tunnel routing over active VPN", color = TextSecondary, fontSize = 11.sp)
+                    }
+                }
+                Switch(
+                    checked = vpnActive,
+                    onCheckedChange = onToggleVpn,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = TextOnAccent,
                         checkedTrackColor = PrimaryAccent,
@@ -461,67 +384,6 @@ private fun SystemSection(
                 } else {
                     Icon(Icons.Default.Check, contentDescription = "Active", tint = StatusGreen, modifier = Modifier.size(20.dp))
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SecurityHardeningSection() {
-    Text("Security & Hardening", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = BorderStroke(1.dp, DarkBorder)
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Shield, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Rate Limiter & Brute-Force Shield", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                }
-                Text("Active (120 req/m)", color = StatusGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("OWASP Security Headers", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                }
-                Text("Enforced", color = StatusGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Password Hash Protection", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                }
-                Text("PBKDF2/SHA-256", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.End)
             }
         }
     }

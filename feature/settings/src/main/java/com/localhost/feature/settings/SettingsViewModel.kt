@@ -3,7 +3,6 @@ package com.localhost.feature.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localhost.core.data.repository.SettingsRepository
-import com.localhost.core.model.DashboardConfig
 import com.localhost.core.model.RuntimePack
 import com.localhost.core.model.RuntimeType
 import com.localhost.runtime.manager.RuntimeManager
@@ -31,8 +30,8 @@ class SettingsViewModel @Inject constructor(
     val wifiOnly: StateFlow<Boolean> = settingsRepository.wifiOnlyMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    val dashboardConfig: StateFlow<DashboardConfig> = settingsRepository.getDashboardConfig()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardConfig())
+    val vpnEnabled: StateFlow<Boolean> = settingsRepository.vpnEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val installedPacks: StateFlow<List<RuntimePack>> = runtimeManager.installedPacks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -52,8 +51,8 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setWifiOnlyMode(enabled) }
     }
 
-    fun saveDashboardConfig(config: DashboardConfig, newPasswordPlain: String? = null) {
-        viewModelScope.launch { settingsRepository.saveDashboardConfig(config, newPasswordPlain) }
+    fun setVpnEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setVpnEnabled(enabled) }
     }
 
     fun installRuntime(pack: RuntimePack) {

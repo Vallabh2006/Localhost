@@ -161,14 +161,25 @@ class DashboardServer @Inject constructor(
 
     private fun isValidHost(host: String): Boolean {
         val cleanedHost = host.substringBefore(":")
-        return cleanedHost == "localhost" ||
-               cleanedHost == "127.0.0.1" ||
-               cleanedHost == "0.0.0.0" ||
-               cleanedHost == "::1" ||
-               cleanedHost.startsWith("192.168.") ||
-               cleanedHost.startsWith("10.") ||
-               cleanedHost.startsWith("172.") ||
-               cleanedHost.endsWith(".trycloudflare.com")
+        if (cleanedHost == "localhost" ||
+            cleanedHost == "127.0.0.1" ||
+            cleanedHost == "0.0.0.0" ||
+            cleanedHost == "::1" ||
+            cleanedHost.startsWith("192.168.") ||
+            cleanedHost.startsWith("10.") ||
+            cleanedHost.endsWith(".trycloudflare.com")
+        ) return true
+
+        if (cleanedHost.startsWith("172.")) {
+            val parts = cleanedHost.split(".")
+            if (parts.size >= 2) {
+                val secondOctet = parts[1].toIntOrNull()
+                if (secondOctet != null && secondOctet in 16..31) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private fun extractBearerToken(authHeader: String?): String? {

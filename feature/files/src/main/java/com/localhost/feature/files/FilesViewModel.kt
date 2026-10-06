@@ -1,19 +1,20 @@
 package com.localhost.feature.files
 
 import android.content.Context
-import android.net.Uri
-import com.localhost.core.common.FileUtils
-
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.Environment
 import android.os.ParcelFileDescriptor
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.localhost.core.common.FileUtils
 import com.localhost.core.data.repository.ProjectRepository
 import com.localhost.core.data.repository.SnapshotRepository
 import com.localhost.core.model.Project
 import com.localhost.core.model.ProjectSnapshot
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.util.Locale
 import javax.inject.Inject
 
 enum class FileType {
@@ -44,10 +47,16 @@ data class UiFile(
     val fileType: FileType
 )
 
+data class FileClipboard(
+    val file: File,
+    val isCut: Boolean
+)
+
 @HiltViewModel
 class FilesViewModel @Inject constructor(
     private val projectRepository: ProjectRepository,
-    private val snapshotRepository: SnapshotRepository
+    private val snapshotRepository: SnapshotRepository,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     val projects: StateFlow<List<Project>> = projectRepository.observeAll()
@@ -89,6 +98,9 @@ class FilesViewModel @Inject constructor(
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()
 
+    private val _clipboard = MutableStateFlow<FileClipboard?>(null)
+    val clipboard = _clipboard.asStateFlow()
+
     fun selectProject(id: String) {
         _selectedProjectId.value = id
         viewModelScope.launch {
@@ -115,12 +127,156 @@ class FilesViewModel @Inject constructor(
         loadFiles(dir)
     }
 
+    fun navigateToPath(pathString: String) {
+        val projectId = _selectedProjectId.value ?: return
+        viewModelScope.launch {
+            val project = projectRepository.getById(projectId) ?: return@launch
+            val root = File(project.workingDir)
+            val trimmed = pathString.trim()
+            val target = if (trimmed.startsWith(root.absolutePath)) {
+                File(trimmed)
+            } else {
+                val rel = trimmed.removePrefix("/")
+                File(root, rel)
+            }
+            if (target.exists() && target.isDirectory) {
+                _currentDir.value = target
+                loadFiles(target)
+            } else {
+                _message.value = "Directory not found: $pathString"
+            }
+        }
+    }
+
     fun navigateUp() {
         val current = _currentDir.value ?: return
-        val parent = current.parentFile
-        if (parent != null && parent.exists()) {
-            _currentDir.value = parent
-            loadFiles(parent)
+        val projectId = _selectedProjectId.value ?: return
+        viewModelScope.launch {
+            val project = projectRepository.getById(projectId) ?: return@launch
+            val root = File(project.workingDir)
+            if (current.canonicalPath == root.canonicalPath) return@launch
+            val parent = current.parentFile
+            if (parent != null && parent.exists() && parent.canonicalPath.startsWith(root.canonicalPath)) {
+                _currentDir.value = parent
+                loadFiles(parent)
+            } else {
+                _currentDir.value = root
+                loadFiles(root)
+            }
+        }
+    }
+
+    fun refreshCurrentDir() {
+        _currentDir.value?.let { loadFiles(it) }
+    }
+
+    fun cutFile(file: File) {
+        _clipboard.value = FileClipboard(file, isCut = true)
+        _message.value = "Cut '${file.name}'"
+    }
+
+    fun copyFile(file: File) {
+        _clipboard.value = FileClipboard(file, isCut = false)
+        _message.value = "Copied '${file.name}'"
+    }
+
+    fun clearClipboard() {
+        _clipboard.value = null
+    }
+
+    fun pasteToCurrentDir() {
+        val clip = _clipboard.value ?: return
+        val current = _currentDir.value ?: return
+        val sourceFile = clip.file
+        if (!sourceFile.exists()) {
+            _message.value = "Source '${sourceFile.name}' does not exist"
+            _clipboard.value = null
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                var targetFile = File(current, sourceFile.name)
+                if (targetFile.canonicalPath == sourceFile.canonicalPath) {
+                    if (clip.isCut) {
+                        _message.value = "Source and destination are the same"
+                        return@launch
+                    }
+                    val baseName = if (sourceFile.isDirectory) sourceFile.name else sourceFile.nameWithoutExtension
+                    val ext = if (sourceFile.isDirectory) "" else if (sourceFile.extension.isNotEmpty()) ".${sourceFile.extension}" else ""
+                    var copyIndex = 1
+                    do {
+                        targetFile = File(current, "${baseName}_copy$copyIndex$ext")
+                        copyIndex++
+                    } while (targetFile.exists())
+                }
+
+                if (clip.isCut) {
+                    val success = sourceFile.renameTo(targetFile)
+                    if (!success) {
+                        if (sourceFile.isDirectory) {
+                            sourceFile.copyRecursively(targetFile, overwrite = true)
+                            sourceFile.deleteRecursively()
+                        } else {
+                            sourceFile.copyTo(targetFile, overwrite = true)
+                            sourceFile.delete()
+                        }
+                    }
+                    _clipboard.value = null
+                    _message.value = "Moved '${sourceFile.name}' here"
+                } else {
+                    if (sourceFile.isDirectory) {
+                        sourceFile.copyRecursively(targetFile, overwrite = true)
+                    } else {
+                        sourceFile.copyTo(targetFile, overwrite = true)
+                    }
+                    _message.value = "Copied '${sourceFile.name}' here"
+                }
+                loadFiles(current)
+            } catch (e: Exception) {
+                _message.value = "Paste failed: ${e.message}"
+            }
+        }
+    }
+
+    fun downloadItem(context: Context, file: File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).let {
+                    if (!it.exists()) it.mkdirs()
+                    if (it.canWrite()) it else File("/sdcard/Download").let { sd ->
+                        if (!sd.exists()) sd.mkdirs()
+                        if (sd.canWrite()) sd else context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                    }
+                }
+
+                if (file.isDirectory) {
+                    _message.value = "Zipping '${file.name}'..."
+                    var targetZip = File(downloadsDir, "${file.name}.zip")
+                    var idx = 1
+                    while (targetZip.exists()) {
+                        targetZip = File(downloadsDir, "${file.name}_$idx.zip")
+                        idx++
+                    }
+                    FileOutputStream(targetZip).use { fos ->
+                        FileUtils.zipDirectory(file, fos)
+                    }
+                    _message.value = "Saved '${targetZip.name}' to Downloads folder (${formatFileSize(targetZip.length())})"
+                } else {
+                    var targetFile = File(downloadsDir, file.name)
+                    var idx = 1
+                    val baseName = file.nameWithoutExtension
+                    val ext = if (file.extension.isNotEmpty()) ".${file.extension}" else ""
+                    while (targetFile.exists()) {
+                        targetFile = File(downloadsDir, "${baseName}_$idx$ext")
+                        idx++
+                    }
+                    file.copyTo(targetFile, overwrite = true)
+                    _message.value = "Saved '${targetFile.name}' to Downloads folder (${formatFileSize(targetFile.length())})"
+                }
+            } catch (e: Exception) {
+                _message.value = "Download failed: ${e.message}"
+            }
         }
     }
 
@@ -369,5 +525,12 @@ class FilesViewModel @Inject constructor(
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        val exp = (Math.log(bytes.toDouble()) / Math.log(1024.0)).toInt()
+        val pre = "KMGTPE"[exp - 1]
+        return String.format(Locale.US, "%.1f %sB", bytes / Math.pow(1024.0, exp.toDouble()), pre)
     }
 }

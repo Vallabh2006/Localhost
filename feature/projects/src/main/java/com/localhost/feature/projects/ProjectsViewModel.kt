@@ -297,7 +297,6 @@ class ProjectsViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Unwrap single nested directory if present (common in GitHub repo zips)
                 var currentRoot = targetDir
                 var rootFiles = currentRoot.listFiles()
                 while (rootFiles != null && rootFiles.size == 1 && rootFiles[0].isDirectory) {
@@ -315,7 +314,6 @@ class ProjectsViewModel @Inject constructor(
                 val (runtime, startCmd) = detectRuntimeFromDirectory(targetDir)
                 val id = UUID.randomUUID().toString()
 
-                // Avoid port collision with existing projects
                 val allExisting = projectRepository.getAll()
                 val usedPorts = allExisting.map { it.port }.toSet()
                 var port = runtime.defaultPort
@@ -411,9 +409,26 @@ class ProjectsViewModel @Inject constructor(
                 return@launch
             }
 
-            val content = try { reqFile.readText() } catch (e: Exception) { "" }
-            val validLines = content.lines()
-                .map { it.trim() }
+            val rawBytes = try { reqFile.readBytes() } catch (e: Exception) { byteArrayOf() }
+            val decodedText = when {
+                rawBytes.size >= 2 && rawBytes[0] == 0xFF.toByte() && rawBytes[1] == 0xFE.toByte() ->
+                    String(rawBytes, 2, rawBytes.size - 2, Charsets.UTF_16LE)
+                rawBytes.size >= 2 && rawBytes[0] == 0xFE.toByte() && rawBytes[1] == 0xFF.toByte() ->
+                    String(rawBytes, 2, rawBytes.size - 2, Charsets.UTF_16BE)
+                rawBytes.size >= 3 && rawBytes[0] == 0xEF.toByte() && rawBytes[1] == 0xBB.toByte() && rawBytes[2] == 0xBF.toByte() ->
+                    String(rawBytes, 3, rawBytes.size - 3, Charsets.UTF_8)
+                else -> {
+                    val utf8 = String(rawBytes, Charsets.UTF_8)
+                    if (utf8.contains('\u0000')) {
+                        try { String(rawBytes, Charsets.UTF_16LE) } catch (_: Exception) { utf8.filter { it != '\u0000' } }
+                    } else {
+                        utf8
+                    }
+                }
+            }
+
+            val validLines = decodedText.lines()
+                .map { it.filter { ch -> ch != '\u0000' && ch != '\r' }.trim() }
                 .filter { it.isNotEmpty() && !it.startsWith("#") }
 
             if (validLines.isEmpty()) {
@@ -422,26 +437,61 @@ class ProjectsViewModel @Inject constructor(
                 return@launch
             }
 
-            val projectVenv = File(workDir, ".venv").apply { mkdirs() }
-            val wheelsDir = File(File(execPath).parentFile?.parentFile, "wheels")
-            val runtimeProvided = setOf("audioop", "audioop-lts", "cryptography", "pillow", "pil", "psycopg2", "psycopg2-binary", "regex", "cffi", "pycparser", "bcrypt", "lxml", "greenlet")
-            val filteredLines = validLines.filter { line ->
+            val runtimeProvided = setOf(
+                "audioop", "audioop-lts", "cryptography", "pillow", "pil",
+                "psycopg2", "psycopg2-binary", "regex", "cffi", "pycparser",
+                "bcrypt", "lxml", "greenlet", "asyncio", "importlib", "logging",
+                "datetime", "flask-cli", "dotenv"
+            )
+
+            val installableLines = validLines.filter { line ->
                 val pkgName = line.split(Regex("[=<>~! ]"))[0].trim().lowercase()
                 !runtimeProvided.contains(pkgName)
             }
-            val packagesToInstall = if (filteredLines.isNotEmpty()) filteredLines else validLines
-            val cmd = mutableListOf(execPath, "-m", "pip", "install", "--prefix", projectVenv.absolutePath, "--prefer-binary")
+
+            val projectVenv = File(workDir, ".venv").apply { mkdirs() }
+            val wheelsDir = File(File(execPath).parentFile?.parentFile, "wheels")
+
+            if (installableLines.isEmpty()) {
+                recordInstalledDependencies(workDir, validLines)
+                val projectSitePackages314 = File(projectVenv, "lib/python3.14/site-packages").apply { mkdirs() }
+                runtimeManager.extractCorePythonAssets(projectSitePackages314)
+                _message.value = "Dependencies satisfied from pre-installed runtime environment"
+                _isInstallingDeps.value = false
+                return@launch
+            }
+
+            val tempReqFile = File(projectVenv, ".install_reqs.txt").apply {
+                writeText(installableLines.joinToString("\n") + "\n", Charsets.UTF_8)
+            }
+
+            val cmd = mutableListOf(
+                execPath,
+                "-m",
+                "pip",
+                "install",
+                "--prefix",
+                projectVenv.absolutePath,
+                "--prefer-binary",
+                "-r",
+                tempReqFile.absolutePath
+            )
             if (wheelsDir.exists()) {
                 cmd.addAll(listOf("--find-links", wheelsDir.absolutePath))
             }
-            cmd.addAll(packagesToInstall)
+
+            val sanitizedCmd = cmd.map { str -> str.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim() }.filter { it.isNotBlank() }
 
             try {
                 withContext(Dispatchers.IO) {
-                    val pb = ProcessBuilder(cmd)
+                    val pb = ProcessBuilder(sanitizedCmd)
                     pb.directory(workDir)
                     val pbEnv = pb.environment()
-                    pbEnv.putAll(env)
+                    env.forEach { (k, v) ->
+                        val ck = k.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim()
+                        val cv = v.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim()
+                        if (ck.isNotBlank()) pbEnv[ck] = cv
+                    }
                     val targetDir = File(execPath).parentFile?.parentFile
                     if (targetDir != null) {
                         val certFile = File(targetDir, "etc/tls/cert.pem")
@@ -520,12 +570,19 @@ class ProjectsViewModel @Inject constructor(
                 return@launch
             }
 
+            val sanitizedCmd = cmd.map { str -> str.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim() }.filter { it.isNotBlank() }
+
+
             try {
                 withContext(Dispatchers.IO) {
-                    val pb = ProcessBuilder(cmd)
+                    val pb = ProcessBuilder(sanitizedCmd)
                     pb.directory(workDir)
                     val pbEnv = pb.environment()
-                    pbEnv.putAll(env)
+                    env.forEach { (k, v) ->
+                        val ck = k.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim()
+                        val cv = v.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim()
+                        if (ck.isNotBlank()) pbEnv[ck] = cv
+                    }
                     val targetDir = File(execPath).parentFile?.parentFile
                     if (targetDir != null) {
                         val certFile = File(targetDir, "etc/tls/cert.pem")
@@ -591,12 +648,19 @@ class ProjectsViewModel @Inject constructor(
                 return@launch
             }
 
+            val sanitizedCmd = cmd.map { str -> str.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim() }.filter { it.isNotBlank() }
+
+
             try {
                 withContext(Dispatchers.IO) {
-                    val pb = ProcessBuilder(cmd)
+                    val pb = ProcessBuilder(sanitizedCmd)
                     pb.directory(workDir)
                     val pbEnv = pb.environment()
-                    pbEnv.putAll(env)
+                    env.forEach { (k, v) ->
+                        val ck = k.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim()
+                        val cv = v.filter { ch -> ch != '\u0000' && ch != '\r' && ch != '\n' }.trim()
+                        if (ck.isNotBlank()) pbEnv[ck] = cv
+                    }
                     val targetDir = File(execPath).parentFile?.parentFile
                     if (targetDir != null) {
                         val certFile = File(targetDir, "etc/tls/cert.pem")

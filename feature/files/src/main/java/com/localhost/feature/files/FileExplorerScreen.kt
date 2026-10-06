@@ -1,20 +1,20 @@
 package com.localhost.feature.files
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.filled.DriveFolderUpload
-import androidx.compose.ui.platform.LocalContext
-
+import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.net.Uri
 import android.webkit.WebView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,15 +26,17 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -42,13 +44,25 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFolderUpload
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
@@ -58,6 +72,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -85,18 +100,20 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -108,6 +125,7 @@ import com.localhost.core.designsystem.theme.DarkSurface
 import com.localhost.core.designsystem.theme.DarkSurfaceElevated
 import com.localhost.core.designsystem.theme.PrimaryAccent
 import com.localhost.core.designsystem.theme.PrimaryAccentContainer
+import com.localhost.core.designsystem.theme.StatusGreen
 import com.localhost.core.designsystem.theme.StatusRed
 import com.localhost.core.designsystem.theme.StatusYellow
 import com.localhost.core.designsystem.theme.TextMuted
@@ -115,6 +133,8 @@ import com.localhost.core.designsystem.theme.TextOnAccent
 import com.localhost.core.designsystem.theme.TextPrimary
 import com.localhost.core.designsystem.theme.TextSecondary
 import com.localhost.core.model.ProjectSnapshot
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -123,8 +143,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileExplorerScreen(
-    viewModel: FilesViewModel,
-    initialProjectId: String? = null
+    initialProjectId: String? = null,
+    viewModel: FilesViewModel
 ) {
     val projects by viewModel.projects.collectAsState()
     val selectedId by viewModel.selectedProjectId.collectAsState()
@@ -139,6 +159,7 @@ fun FileExplorerScreen(
     val currentPdfPage by viewModel.currentPdfPage.collectAsState()
     val snapshots by viewModel.snapshots.collectAsState()
     val message by viewModel.message.collectAsState()
+    val clipboard by viewModel.clipboard.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val haptics = LocalHapticFeedback.current
@@ -257,7 +278,7 @@ fun FileExplorerScreen(
             ) {
                 Column(
                     modifier = Modifier
-                        .weight(0.38f)
+                        .weight(0.40f)
                         .fillMaxHeight()
                         .background(DarkSurface)
                 ) {
@@ -275,11 +296,22 @@ fun FileExplorerScreen(
                     }
 
                     if (currentProject != null) {
-                        BreadcrumbPathBar(
+                        AddressBar(
                             currentDir = currentDir,
                             projectDir = currentProject.workingDir,
-                            onNavigateUp = { viewModel.navigateUp() }
+                            onNavigateTo = { viewModel.navigateTo(it) },
+                            onNavigateUp = { viewModel.navigateUp() },
+                            onNavigateToPath = { viewModel.navigateToPath(it) },
+                            onRefresh = { viewModel.refreshCurrentDir() }
                         )
+
+                        if (clipboard != null) {
+                            ClipboardStatusBar(
+                                clipboard = clipboard!!,
+                                onPaste = { viewModel.pasteToCurrentDir() },
+                                onClear = { viewModel.clearClipboard() }
+                            )
+                        }
 
                         Row(
                             modifier = Modifier
@@ -325,7 +357,11 @@ fun FileExplorerScreen(
                                 if (f.isDirectory) viewModel.navigateTo(f.file)
                                 else viewModel.openFile(f.file)
                             },
-                            onDeleteClick = { f -> fileToDelete = f }
+                            onCutClick = { f -> viewModel.cutFile(f.file) },
+                            onCopyClick = { f -> viewModel.copyFile(f.file) },
+                            onDownloadClick = { f -> viewModel.downloadItem(context, f.file) },
+                            onDeleteClick = { f -> fileToDelete = f },
+                            onExtractClick = { f -> viewModel.extractArchiveFile(f.file) }
                         )
                     }
                 }
@@ -339,7 +375,7 @@ fun FileExplorerScreen(
 
                 Box(
                     modifier = Modifier
-                        .weight(0.62f)
+                        .weight(0.60f)
                         .fillMaxHeight()
                 ) {
                     if (editingFile != null) {
@@ -391,11 +427,22 @@ fun FileExplorerScreen(
                 }
 
                 if (currentProject != null) {
-                    BreadcrumbPathBar(
+                    AddressBar(
                         currentDir = currentDir,
                         projectDir = currentProject.workingDir,
-                        onNavigateUp = { viewModel.navigateUp() }
+                        onNavigateTo = { viewModel.navigateTo(it) },
+                        onNavigateUp = { viewModel.navigateUp() },
+                        onNavigateToPath = { viewModel.navigateToPath(it) },
+                        onRefresh = { viewModel.refreshCurrentDir() }
                     )
+
+                    if (clipboard != null) {
+                        ClipboardStatusBar(
+                            clipboard = clipboard!!,
+                            onPaste = { viewModel.pasteToCurrentDir() },
+                            onClear = { viewModel.clearClipboard() }
+                        )
+                    }
 
                     FileListContent(
                         files = files,
@@ -403,7 +450,11 @@ fun FileExplorerScreen(
                             if (f.isDirectory) viewModel.navigateTo(f.file)
                             else viewModel.openFile(f.file)
                         },
-                        onDeleteClick = { f -> fileToDelete = f }
+                        onCutClick = { f -> viewModel.cutFile(f.file) },
+                        onCopyClick = { f -> viewModel.copyFile(f.file) },
+                        onDownloadClick = { f -> viewModel.downloadItem(context, f.file) },
+                        onDeleteClick = { f -> fileToDelete = f },
+                        onExtractClick = { f -> viewModel.extractArchiveFile(f.file) }
                     )
                 } else {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -498,63 +549,63 @@ fun FileExplorerScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.History, contentDescription = null, tint = PrimaryAccent)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Snapshots & History", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimary)
-                    }
-
+                    Text("Version History (Local VCS)", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimary)
                     Button(
                         onClick = { showCommitDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.Save, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Add, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Save Snapshot", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Snapshot", color = TextOnAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
+                Spacer(modifier = Modifier.height(16.dp))
+
                 if (snapshots.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text("No snapshot checkpoints saved yet.", color = TextMuted, fontSize = 13.sp)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("No snapshots recorded yet. Create one to protect your code state.", color = TextMuted, fontSize = 13.sp)
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxWidth().height(320.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(340.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(snapshots, key = { it.id }) { item ->
-                            val dateStr = dateFormat.format(Date(item.timestamp))
+                            val dateStr = remember(item.timestamp) { dateFormat.format(Date(item.timestamp)) }
                             Card(
+                                modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
                                 border = BorderStroke(1.dp, DarkBorderSubtle)
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(PrimaryAccentContainer)
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(item.id, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = PrimaryAccent, fontWeight = FontWeight.Bold)
-                                            }
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("#${item.id}", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PrimaryAccent)
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Text(item.message, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
                                         }
                                         Spacer(modifier = Modifier.height(2.dp))
@@ -660,7 +711,6 @@ private fun ProjectSelectorHeader(
     onSelectProject: (String) -> Unit
 ) {
     val currentProject = projects.find { it.id == selectedId }
-    val context = LocalContext.current
 
     ExposedDropdownMenuBox(
         expanded = dropdownExpanded,
@@ -704,38 +754,250 @@ private fun ProjectSelectorHeader(
 }
 
 @Composable
-private fun BreadcrumbPathBar(
+private fun AddressBar(
     currentDir: File?,
     projectDir: String,
-    onNavigateUp: () -> Unit
+    onNavigateTo: (File) -> Unit,
+    onNavigateUp: () -> Unit,
+    onNavigateToPath: (String) -> Unit,
+    onRefresh: () -> Unit
 ) {
-    val isRoot = currentDir?.absolutePath == projectDir
-    val relativePath = currentDir?.let {
-        val rel = it.absolutePath.removePrefix(projectDir).trimStart('/')
-        if (rel.isEmpty()) "/" else "/$rel"
-    } ?: "/"
+    val rootDir = remember(projectDir) { File(projectDir) }
+    val isRoot = currentDir?.canonicalPath == rootDir.canonicalPath
+    val relativePath = remember(currentDir, projectDir) {
+        if (currentDir == null) "/"
+        else {
+            val rel = currentDir.canonicalPath.removePrefix(rootDir.canonicalPath).trimStart('/')
+            if (rel.isEmpty()) "/" else "/$rel"
+        }
+    }
 
-    Row(
+    var isEditMode by remember { mutableStateOf(false) }
+    var textInput by remember(relativePath) { mutableStateOf(relativePath) }
+
+    Surface(
+        color = DarkSurface,
         modifier = Modifier
             .fillMaxWidth()
-            .background(DarkSurface)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, DarkBorderSubtle)
     ) {
-        if (!isRoot) {
-            IconButton(onClick = onNavigateUp, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up", tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+        if (isEditMode) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = textInput,
+                    onValueChange = { textInput = it },
+                    singleLine = true,
+                    placeholder = { Text("/path/to/folder", color = TextMuted, fontSize = 12.sp) },
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = TextPrimary
+                    ),
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = {
+                        onNavigateToPath(textInput)
+                        isEditMode = false
+                    }),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryAccent,
+                        unfocusedBorderColor = DarkBorderSubtle,
+                        cursorColor = PrimaryAccent,
+                        focusedContainerColor = DarkBackground,
+                        unfocusedContainerColor = DarkBackground
+                    )
+                )
+
+                IconButton(
+                    onClick = {
+                        onNavigateToPath(textInput)
+                        isEditMode = false
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = "Go", tint = StatusGreen, modifier = Modifier.size(18.dp))
+                }
+
+                IconButton(
+                    onClick = {
+                        textInput = relativePath
+                        isEditMode = false
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                }
             }
-            Spacer(modifier = Modifier.width(4.dp))
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { onNavigateTo(rootDir) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Home, contentDescription = "Root", tint = if (isRoot) TextMuted else PrimaryAccent, modifier = Modifier.size(18.dp))
+                }
+
+                IconButton(
+                    onClick = onNavigateUp,
+                    enabled = !isRoot,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ArrowUpward,
+                        contentDescription = "Up",
+                        tint = if (!isRoot) PrimaryAccent else TextMuted.copy(alpha = 0.4f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val segments = remember(relativePath) {
+                        if (relativePath == "/") emptyList()
+                        else relativePath.split("/").filter { it.isNotEmpty() }
+                    }
+
+                    Surface(
+                        color = if (segments.isEmpty()) PrimaryAccentContainer else DarkSurfaceElevated,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.clickable { onNavigateTo(rootDir) }
+                    ) {
+                        Text(
+                            text = "~",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = if (segments.isEmpty()) PrimaryAccent else TextSecondary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    var accumulatedPath = rootDir
+                    segments.forEachIndexed { index, segment ->
+                        accumulatedPath = File(accumulatedPath, segment)
+                        val targetDir = accumulatedPath
+                        val isLast = index == segments.size - 1
+
+                        Text("/", color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 2.dp))
+
+                        Surface(
+                            color = if (isLast) PrimaryAccentContainer else DarkSurfaceElevated,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.clickable { onNavigateTo(targetDir) }
+                        ) {
+                            Text(
+                                text = segment,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (isLast) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                                color = if (isLast) PrimaryAccent else TextPrimary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        textInput = relativePath
+                        isEditMode = true
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit Path", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+
+                IconButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+            }
         }
-        Text(
-            text = relativePath,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
-            color = PrimaryAccent,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
+    }
+}
+
+@Composable
+private fun ClipboardStatusBar(
+    clipboard: FileClipboard,
+    onPaste: () -> Unit,
+    onClear: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+        border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = if (clipboard.isCut) Icons.Default.ContentCut else Icons.Default.ContentCopy,
+                    contentDescription = null,
+                    tint = PrimaryAccent,
+                    modifier = Modifier.size(18.dp)
+                )
+                Column {
+                    Text(
+                        text = if (clipboard.isCut) "Cut: ${clipboard.file.name}" else "Copied: ${clipboard.file.name}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text("Ready to paste into current folder", fontSize = 10.sp, color = TextMuted)
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(
+                    onClick = onPaste,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.ContentPaste, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Paste", color = TextOnAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear clipboard", tint = TextMuted, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
     }
 }
 
@@ -743,31 +1005,51 @@ private fun BreadcrumbPathBar(
 private fun FileListContent(
     files: List<UiFile>,
     onFileClick: (UiFile) -> Unit,
-    onDeleteClick: (UiFile) -> Unit
+    onCutClick: (UiFile) -> Unit,
+    onCopyClick: (UiFile) -> Unit,
+    onDownloadClick: (UiFile) -> Unit,
+    onDeleteClick: (UiFile) -> Unit,
+    onExtractClick: (UiFile) -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
 
     if (files.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-            Text("Directory is empty", color = TextMuted, fontSize = 13.sp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Folder, contentDescription = null, tint = TextMuted, modifier = Modifier.size(48.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Directory is empty", color = TextMuted, fontSize = 14.sp)
+            }
         }
     } else {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 80.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
         ) {
             items(files, key = { it.file.absolutePath }) { fileItem ->
+                var menuExpanded by remember { mutableStateOf(false) }
                 val isDir = fileItem.isDirectory
-                val modDate = dateFormat.format(Date(fileItem.lastModified))
-                val sizeStr = if (isDir) "${fileItem.file.listFiles()?.size ?: 0} items" else formatFileSize(fileItem.size)
+                val sizeStr = remember(fileItem.size, isDir) {
+                    if (isDir) "Folder" else formatFileSize(fileItem.size)
+                }
+                val modDate = remember(fileItem.lastModified) {
+                    dateFormat.format(Date(fileItem.lastModified))
+                }
 
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onFileClick(fileItem) },
                     shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = BorderStroke(1.dp, DarkBorderSubtle)
                 ) {
                     Row(
@@ -789,7 +1071,7 @@ private fun FileListContent(
                                 },
                                 contentDescription = null,
                                 tint = if (isDir) PrimaryAccent else TextSecondary,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
@@ -798,8 +1080,71 @@ private fun FileListContent(
                             }
                         }
 
-                        IconButton(onClick = { onDeleteClick(fileItem) }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = TextMuted, modifier = Modifier.size(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { onDownloadClick(fileItem) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.FileDownload, contentDescription = "Download", tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                            }
+
+                            Box {
+                                IconButton(
+                                    onClick = { menuExpanded = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More actions", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                                }
+
+                                DropdownMenu(
+                                    expanded = menuExpanded,
+                                    onDismissRequest = { menuExpanded = false },
+                                    modifier = Modifier.background(DarkSurfaceElevated)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Cut", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.ContentCut, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onCutClick(fileItem)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Copy", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onCopyClick(fileItem)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(if (fileItem.isDirectory) "Download (Zip)" else "Download", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onDownloadClick(fileItem)
+                                        }
+                                    )
+                                    if (fileItem.fileType == FileType.ARCHIVE) {
+                                        DropdownMenuItem(
+                                            text = { Text("Extract Archive", color = TextPrimary) },
+                                            leadingIcon = { Icon(Icons.Default.DriveFolderUpload, contentDescription = null, tint = StatusYellow, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                menuExpanded = false
+                                                onExtractClick(fileItem)
+                                            }
+                                        )
+                                    }
+                                    DropdownMenuItem(
+                                        text = { Text("Delete", color = StatusRed) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = StatusRed, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onDeleteClick(fileItem)
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -825,10 +1170,14 @@ fun FileEditorAndViewerScreen(
 ) {
     var textInput by remember(content) { mutableStateOf(content) }
     var svgPreviewMode by remember { mutableStateOf(true) }
+    var isSavedRecently by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+    val editorSnackbarHostState = remember { SnackbarHostState() }
 
     Scaffold(
         containerColor = CodeBackground,
+        snackbarHost = { SnackbarHost(editorSnackbarHostState) },
         topBar = {
             Surface(color = DarkSurface, border = BorderStroke(1.dp, DarkBorderSubtle)) {
                 Row(
@@ -861,14 +1210,32 @@ fun FileEditorAndViewerScreen(
                                 onClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onSave(textInput)
+                                    isSavedRecently = true
+                                    coroutineScope.launch {
+                                        editorSnackbarHostState.showSnackbar("Saved ${file.name}")
+                                        delay(2000)
+                                        isSavedRecently = false
+                                    }
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSavedRecently) StatusGreen else PrimaryAccent
+                                ),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                             ) {
-                                Icon(Icons.Default.Save, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    imageVector = if (isSavedRecently) Icons.Default.Check else Icons.Default.Save,
+                                    contentDescription = null,
+                                    tint = TextOnAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Save", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text(
+                                    text = if (isSavedRecently) "Saved" else "Save",
+                                    color = TextOnAccent,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
                             }
                         }
                     }
@@ -889,7 +1256,7 @@ fun FileEditorAndViewerScreen(
                     )
                 }
                 FileType.IMAGE -> {
-                    ImageViewer(imageBitmap)
+                    ImageViewer(file = file, bitmap = imageBitmap)
                 }
                 FileType.SVG -> {
                     if (svgPreviewMode) {
@@ -950,15 +1317,6 @@ private fun CodeTextEditor(
                 .padding(end = 10.dp)
         )
 
-        Box(
-            modifier = Modifier
-                .width(1.dp)
-                .fillMaxHeight()
-                .background(DarkBorderSubtle)
-        )
-
-        Spacer(modifier = Modifier.width(10.dp))
-
         BasicTextField(
             value = text,
             onValueChange = onTextChange,
@@ -977,14 +1335,50 @@ private fun CodeTextEditor(
 }
 
 @Composable
-private fun ImageViewer(bitmap: Bitmap?) {
+private fun ImageViewer(file: File, bitmap: Bitmap?) {
+    val isGif = remember(file) { file.extension.equals("gif", ignoreCase = true) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
-        if (bitmap != null) {
+        if (isGif) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        setBackgroundColor(0xFF161B22.toInt())
+                        settings.javaScriptEnabled = false
+                        settings.allowFileAccess = true
+                        settings.loadWithOverviewMode = true
+                        settings.useWideViewPort = true
+                    }
+                },
+                update = { webView ->
+                    val html = """
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <style>
+                          body { margin: 0; background: #161B22; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+                          img { max-width: 95%; max-height: 95%; object-fit: contain; border-radius: 8px; }
+                        </style>
+                        </head>
+                        <body>
+                          <img src="file://${file.absolutePath}" alt="GIF animation" />
+                        </body>
+                        </html>
+                    """.trimIndent()
+                    webView.loadDataWithBaseURL("file://${file.parentFile?.absolutePath ?: ""}/", html, "text/html", "UTF-8", null)
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+            )
+        } else if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = "Image preview",
