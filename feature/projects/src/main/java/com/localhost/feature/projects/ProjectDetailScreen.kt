@@ -1,7 +1,11 @@
 package com.localhost.feature.projects
 
+import kotlinx.coroutines.launch
+
 import androidx.compose.foundation.Image
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Check
@@ -156,6 +160,7 @@ fun ProjectDetailScreen(
     var qrDialogUrl by remember { mutableStateOf<String?>(null) }
     val tabs = listOf("Overview", "Snapshots", "Packages", "Env Vars", "Control")
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(message) {
         message?.let {
@@ -164,20 +169,31 @@ fun ProjectDetailScreen(
         }
     }
 
+    var showEditDialog by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+
     fun shareExportedZip() {
         if (project == null) return
-        val zipFile = viewModel.exportProjectZip(project, context)
-        if (zipFile != null && zipFile.exists()) {
+        scope.launch {
+            isExporting = true
+            Toast.makeText(context, "Exporting ${project.name} ZIP...", Toast.LENGTH_SHORT).show()
             try {
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
-                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/zip"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val zipFile = viewModel.exportProjectZip(project, context)
+                if (zipFile != null && zipFile.exists()) {
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/zip"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(sendIntent, "Export ${project.name} ZIP"))
+                } else {
+                    Toast.makeText(context, "Failed to create project ZIP", Toast.LENGTH_SHORT).show()
                 }
-                context.startActivity(Intent.createChooser(sendIntent, "Export ${project.name} ZIP"))
             } catch (e: Exception) {
                 Toast.makeText(context, "Export share error: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                isExporting = false
             }
         }
     }
@@ -237,9 +253,28 @@ fun ProjectDetailScreen(
                     }
                     IconButton(onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        shareExportedZip()
+                        showEditDialog = true
                     }) {
-                        Icon(Icons.Default.Share, contentDescription = "Export ZIP", tint = PrimaryAccent)
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Project", tint = TextPrimary)
+                    }
+                    IconButton(
+                        onClick = {
+                            if (!isExporting) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                shareExportedZip()
+                            }
+                        },
+                        enabled = !isExporting
+                    ) {
+                        if (isExporting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = PrimaryAccent,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Share, contentDescription = "Export ZIP", tint = PrimaryAccent)
+                        }
                     }
                     IconButton(onClick = { onOpenFiles(project.id) }) {
                         Icon(Icons.Default.Folder, contentDescription = "Files", tint = TextSecondary)
@@ -412,6 +447,72 @@ fun ProjectDetailScreen(
                 }
             }
         }
+    }
+
+    if (showEditDialog && project != null) {
+        var editName by remember(project.name) { mutableStateOf(project.name) }
+        var editPort by remember(project.port) { mutableStateOf(project.port.toString()) }
+
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = {
+                Text("Edit Project", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Project Name") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = editPort,
+                        onValueChange = { if (it.all { ch -> ch.isDigit() }) editPort = it },
+                        label = { Text("Port (1024 - 65535)") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val portInt = editPort.toIntOrNull()
+                        if (portInt != null && portInt in 1024..65535 && editName.isNotBlank()) {
+                            viewModel.updateProjectDetails(project, editName.trim(), portInt)
+                            showEditDialog = false
+                        } else {
+                            Toast.makeText(context, "Please enter a valid name and port (1024-65535)", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                ) {
+                    Text("Save", color = DarkBackground)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text("Cancel", color = TextMuted)
+                }
+            },
+            containerColor = DarkSurface,
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 
     qrDialogUrl?.let { url ->

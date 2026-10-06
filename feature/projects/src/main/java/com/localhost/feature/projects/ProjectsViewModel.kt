@@ -198,23 +198,52 @@ class ProjectsViewModel @Inject constructor(
         }
     }
 
-    fun exportProjectZip(project: Project, context: Context): File? {
+    fun updateProjectDetails(project: Project, newName: String, newPort: Int) {
+        viewModelScope.launch {
+            val trimmedName = newName.trim()
+            if (trimmedName.isBlank()) {
+                _message.value = "Project name cannot be empty"
+                return@launch
+            }
+            if (newPort !in 1024..65535) {
+                _message.value = "Port must be between 1024 and 65535"
+                return@launch
+            }
+            val updatedCmd = if (project.port != newPort) {
+                project.startupCommand.replace(":${project.port}", ":$newPort")
+            } else {
+                project.startupCommand
+            }
+            val updated = project.copy(
+                name = trimmedName,
+                port = newPort,
+                startupCommand = updatedCmd,
+                updatedAt = System.currentTimeMillis()
+            )
+            projectRepository.save(updated)
+            _message.value = "Project updated successfully"
+        }
+    }
+
+    suspend fun exportProjectZip(project: Project, context: Context): File? = withContext(Dispatchers.IO) {
         val projectDir = File(project.workingDir)
         if (!projectDir.exists()) {
             _message.value = "Project directory not found"
-            return null
+            return@withContext null
         }
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
-        val zipFile = File(exportDir, "${project.name.replace(" ", "_")}.zip")
+        val safeName = project.name.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
+        val zipFile = File(exportDir, "${safeName}.zip")
         try {
+            if (zipFile.exists()) zipFile.delete()
             FileOutputStream(zipFile).use { fos ->
                 FileUtils.zipDirectory(projectDir, fos)
             }
             _message.value = "Exported ${project.name} to ZIP"
-            return zipFile
+            zipFile
         } catch (e: Exception) {
             _message.value = "Export failed: ${e.message}"
-            return null
+            null
         }
     }
 

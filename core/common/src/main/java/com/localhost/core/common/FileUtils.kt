@@ -56,15 +56,24 @@ object FileUtils {
         return file.delete()
     }
 
-    fun zipDirectory(sourceDir: File, outputStream: OutputStream) {
+    fun zipDirectory(
+        sourceDir: File,
+        outputStream: OutputStream,
+        excludeDirNames: Set<String> = setOf(".venv", "node_modules", ".tmp", "__pycache__", ".git", ".idea", ".vscode")
+    ) {
         ZipOutputStream(outputStream).use { zos ->
-            sourceDir.walkTopDown().filter { it.isFile }.forEach { file ->
-                val relativePath = file.relativeTo(sourceDir).path
-                if (isSafePath(relativePath)) {
-                    zos.putNextEntry(ZipEntry(relativePath))
-                    file.inputStream().use { it.copyTo(zos) }
-                    zos.closeEntry()
-                }
+            val files = sourceDir.walkTopDown()
+                .onEnter { dir -> !excludeDirNames.contains(dir.name) }
+                .filter { it.isFile }
+            for (file in files) {
+                try {
+                    val relativePath = file.relativeTo(sourceDir).path
+                    if (isSafePath(relativePath)) {
+                        zos.putNextEntry(ZipEntry(relativePath))
+                        file.inputStream().use { it.copyTo(zos) }
+                        zos.closeEntry()
+                    }
+                } catch (_: Exception) {}
             }
         }
     }
