@@ -427,25 +427,14 @@ class ProjectsViewModel @Inject constructor(
                     val combined = (output + if (error.isNotBlank()) "\n$error" else "").trim()
                     if (exit == 0) {
                         recordInstalledDependencies(workDir, validLines)
-                        _message.value = "Pip dependencies from '$targetName' installed successfully"
+                        _message.value = "Dependencies from '$targetName' installed successfully"
                     } else {
-                        val isInvalidTxt = combined.contains("Invalid requirement", ignoreCase = true) ||
-                                           combined.contains("RequirementParseError", ignoreCase = true) ||
-                                           combined.contains("Could not open requirements file", ignoreCase = true) ||
-                                           combined.contains("No such file", ignoreCase = true)
-                        if (isInvalidTxt) {
-                            _message.value = "Invalid requirements txt passed: ${combined.take(150)}"
-                        } else {
-                            recordInstalledDependencies(workDir, validLines)
-                            _message.value = "Dependencies from '$targetName' configured successfully"
-                        }
+                        val errMsg = combined.lines().filter { it.isNotBlank() }.takeLast(2).joinToString(" ").take(150)
+                        _message.value = "Failed to install '$targetName'${if (errMsg.isNotBlank()) ": $errMsg" else ""}"
                     }
                 }
-            } catch (_: Exception) {
-                withContext(Dispatchers.IO) {
-                    recordInstalledDependencies(workDir, validLines)
-                }
-                _message.value = "Dependencies from '$targetName' configured successfully"
+            } catch (e: Exception) {
+                _message.value = "Failed to install dependencies: ${e.message ?: "Unknown error"}"
             } finally {
                 _isInstallingDeps.value = false
             }
@@ -520,15 +509,12 @@ class ProjectsViewModel @Inject constructor(
                         if (isCustom) recordCustomPackage(workDir, packageName)
                         _message.value = if (isCustom) "Package '$packageName' installed successfully" else "Dependencies installed successfully"
                     } else {
-                        if (isCustom) recordCustomPackage(workDir, packageName)
-                        _message.value = if (isCustom) "Package '$packageName' configured successfully" else "Dependencies configured successfully"
+                        val errMsg = combined.lines().filter { it.isNotBlank() }.takeLast(2).joinToString(" ").take(150)
+                        _message.value = if (isCustom) "Failed to install '$packageName'${if (errMsg.isNotBlank()) ": $errMsg" else ""}" else "Failed to install dependencies${if (errMsg.isNotBlank()) ": $errMsg" else ""}"
                     }
                 }
-            } catch (_: Exception) {
-                withContext(Dispatchers.IO) {
-                    if (isCustom) recordCustomPackage(workDir, packageName)
-                }
-                _message.value = if (isCustom) "Package '$packageName' configured successfully" else "Dependencies configured successfully"
+            } catch (e: Exception) {
+                _message.value = if (isCustom) "Failed to install '$packageName': ${e.message ?: "Unknown error"}" else "Failed to install dependencies: ${e.message ?: "Unknown error"}"
             } finally {
                 _isInstallingDeps.value = false
             }

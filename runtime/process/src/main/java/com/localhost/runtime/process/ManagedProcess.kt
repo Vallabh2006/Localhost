@@ -122,8 +122,12 @@ class ManagedProcess(
                     env["WERKZEUG_DEBUG_PIN"] = "off"
                     if (targetDir != null) {
                         val certFile = File(targetDir, "etc/tls/cert.pem")
-                        if (certFile.exists()) {
-                            env["SSL_CERT_FILE"] = certFile.absolutePath
+                        val certifiFile = File(targetDir, "lib/python3.14/site-packages/certifi/cacert.pem")
+                        val activeCert = if (certFile.exists()) certFile else if (certifiFile.exists()) certifiFile else null
+                        if (activeCert != null) {
+                            env["SSL_CERT_FILE"] = activeCert.absolutePath
+                            env["REQUESTS_CA_BUNDLE"] = activeCert.absolutePath
+                            env["CURL_CA_BUNDLE"] = activeCert.absolutePath
                         }
                     }
                 }

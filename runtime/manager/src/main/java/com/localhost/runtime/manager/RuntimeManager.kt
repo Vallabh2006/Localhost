@@ -229,12 +229,21 @@ class RuntimeManager @Inject constructor(
         return when (runtime) {
             RuntimeType.PYTHON -> {
                 val sitePackages = "$libPath/python3.14/site-packages:$libPath/python3.12/site-packages:$libPath/python3/site-packages"
-                mapOf(
+                val certFile = File(targetDir, "etc/tls/cert.pem")
+                val certifiFile = File(targetDir, "lib/python3.14/site-packages/certifi/cacert.pem")
+                val activeCert = if (certFile.exists()) certFile else if (certifiFile.exists()) certifiFile else null
+                val envMap = mutableMapOf(
                     "PATH" to "$binPath:$targetDir:$nativeLibDir:$currentPath",
                     "PYTHONHOME" to targetDir,
                     "PYTHONPATH" to sitePackages,
                     "LD_LIBRARY_PATH" to "$libPath:$nativeLibDir"
                 )
+                if (activeCert != null) {
+                    envMap["SSL_CERT_FILE"] = activeCert.absolutePath
+                    envMap["REQUESTS_CA_BUNDLE"] = activeCert.absolutePath
+                    envMap["CURL_CA_BUNDLE"] = activeCert.absolutePath
+                }
+                envMap
             }
             RuntimeType.NODEJS -> mapOf(
                 "PATH" to "$binPath:$targetDir:$nativeLibDir:$currentPath",
