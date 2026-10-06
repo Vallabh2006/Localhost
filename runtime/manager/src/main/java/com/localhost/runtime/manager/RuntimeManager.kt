@@ -263,13 +263,14 @@ class RuntimeManager @Inject constructor(
         }
     }
 
-    private fun extractCorePythonAssets(sitePackagesDir: File) {
+    fun extractCorePythonAssets(sitePackagesDir: File? = null) {
         try {
-            sitePackagesDir.mkdirs()
+            val target = sitePackagesDir ?: File(runtimesDir, "python/lib/python3.14/site-packages")
+            target.mkdirs()
             val assetNames = context.assets.list("") ?: emptyArray()
             if ("python_core_pkgs.zip" in assetNames) {
                 context.assets.open("python_core_pkgs.zip").use { input ->
-                    FileUtils.unzip(input, sitePackagesDir)
+                    FileUtils.unzip(input, target)
                 }
             }
         } catch (_: Exception) {}

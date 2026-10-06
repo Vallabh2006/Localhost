@@ -427,6 +427,10 @@ class ProjectsViewModel @Inject constructor(
                     val combined = (output + if (error.isNotBlank()) "\n$error" else "").trim()
                     if (exit == 0) {
                         recordInstalledDependencies(workDir, validLines)
+                        val projectSitePackages314 = File(projectVenv, "lib/python3.14/site-packages")
+                        if (projectSitePackages314.exists()) {
+                            runtimeManager.extractCorePythonAssets(projectSitePackages314)
+                        }
                         _message.value = "Dependencies from '$targetName' installed successfully"
                     } else {
                         val errMsg = combined.lines().filter { it.isNotBlank() }.takeLast(2).joinToString(" ").take(150)
@@ -507,6 +511,12 @@ class ProjectsViewModel @Inject constructor(
                     val combined = (output + if (error.isNotBlank()) "\n$error" else "").trim()
                     if (exit == 0) {
                         if (isCustom) recordCustomPackage(workDir, packageName)
+                        if (project.runtime == RuntimeType.PYTHON) {
+                            val projectSitePackages314 = File(projectVenv, "lib/python3.14/site-packages")
+                            if (projectSitePackages314.exists()) {
+                                runtimeManager.extractCorePythonAssets(projectSitePackages314)
+                            }
+                        }
                         _message.value = if (isCustom) "Package '$packageName' installed successfully" else "Dependencies installed successfully"
                     } else {
                         val errMsg = combined.lines().filter { it.isNotBlank() }.takeLast(2).joinToString(" ").take(150)
