@@ -55,7 +55,11 @@ class RuntimeManager @Inject constructor(
                 FileUtils.deleteRecursively(phpDir)
             }
         } catch (_: Exception) {}
-        ensureFallbackWheels(File(File(runtimesDir, "python"), "wheels"))
+        val pyDir = File(runtimesDir, "python")
+        if (pyDir.exists()) {
+            extractCorePythonAssets(File(pyDir, "lib/python3.14/site-packages"))
+        }
+        ensureFallbackWheels(File(pyDir, "wheels"))
         refreshInstalled()
     }
 
@@ -250,6 +254,18 @@ class RuntimeManager @Inject constructor(
         }
     }
 
+    private fun extractCorePythonAssets(sitePackagesDir: File) {
+        try {
+            sitePackagesDir.mkdirs()
+            val assetNames = context.assets.list("") ?: emptyArray()
+            if ("python_core_pkgs.zip" in assetNames) {
+                context.assets.open("python_core_pkgs.zip").use { input ->
+                    FileUtils.unzip(input, sitePackagesDir)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun ensureFallbackWheels(wheelsDir: File) {
         try {
             wheelsDir.mkdirs()
@@ -421,7 +437,11 @@ class RuntimeManager @Inject constructor(
                         "https://packages.termux.dev/apt/termux-main/pool/main/libj/libjpeg-turbo/libjpeg-turbo_3.2.0_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/o/openjpeg/openjpeg_2.5.4_${arch}.deb",
                         "https://packages.termux.dev/apt/termux-main/pool/main/p/python-pillow/python-pillow_12.3.0_${arch}.deb",
-                        "https://packages.termux.dev/apt/termux-main/pool/main/p/python-pycryptodomex/python-pycryptodomex_3.24.0_${arch}.deb"
+                        "https://packages.termux.dev/apt/termux-main/pool/main/p/python-pycryptodomex/python-pycryptodomex_3.24.0_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/p/python-cryptography/python-cryptography_50.0.2_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/p/python-greenlet/python-greenlet_3.5.6_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/p/python-bcrypt/python-bcrypt_5.0.0-3_${arch}.deb",
+                        "https://packages.termux.dev/apt/termux-main/pool/main/p/python-lxml/python-lxml_6.1.3_${arch}.deb"
                     )
 
                     debUrls.forEach { debUrl ->
@@ -474,6 +494,7 @@ class RuntimeManager @Inject constructor(
                         try { if (pip3.exists()) pip3.delete(); Os.symlink("pip3.14", pip3.absolutePath) } catch (_: Exception) {}
                         try { if (pip.exists()) pip.delete(); Os.symlink("pip3", pip.absolutePath) } catch (_: Exception) {}
                     }
+                    extractCorePythonAssets(File(targetDir, "lib/python3.14/site-packages"))
                     ensureFallbackWheels(File(targetDir, "wheels"))
                 }
                 finalArchive.delete()

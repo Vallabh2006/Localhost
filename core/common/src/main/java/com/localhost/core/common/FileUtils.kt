@@ -141,11 +141,11 @@ object FileUtils {
         try {
             FileInputStream(debFile).use { fis ->
                 val magic = ByteArray(8)
-                val readMagic = fis.read(magic)
+                val readMagic = readFully(fis, magic)
                 if (readMagic != 8 || String(magic, StandardCharsets.US_ASCII) != "!<arch>\n") {
                     return
                 }
-                while (fis.available() > 0) {
+                while (true) {
                     val header = ByteArray(60)
                     val readHdr = readFully(fis, header)
                     if (readHdr < 60) break
@@ -156,7 +156,7 @@ object FileUtils {
                         val tempArchive = File(targetDir, "temp_data_archive").apply { parentFile?.mkdirs() }
                         FileOutputStream(tempArchive).use { fos ->
                             var remaining = size
-                            val buf = ByteArray(16384)
+                            val buf = ByteArray(32768)
                             while (remaining > 0) {
                                 val toRead = remaining.coerceAtMost(buf.size.toLong()).toInt()
                                 val r = fis.read(buf, 0, toRead)
@@ -167,6 +167,8 @@ object FileUtils {
                         }
                         extractArchive(tempArchive, targetDir)
                         tempArchive.delete()
+                        val pad = (size % 2).toInt()
+                        if (pad > 0) skipFully(fis, pad.toLong())
                     } else {
                         skipFully(fis, size + (size % 2))
                     }
@@ -393,16 +395,12 @@ object FileUtils {
 
     private fun skipFully(inputStream: InputStream, bytes: Long) {
         var remaining = bytes
+        val dummy = ByteArray(16384)
         while (remaining > 0) {
-            val skipped = inputStream.skip(remaining)
-            if (skipped <= 0) {
-                val dummy = ByteArray(remaining.coerceAtMost(4096L).toInt())
-                val r = inputStream.read(dummy)
-                if (r <= 0) break
-                remaining -= r
-            } else {
-                remaining -= skipped
-            }
+            val toRead = remaining.coerceAtMost(dummy.size.toLong()).toInt()
+            val r = inputStream.read(dummy, 0, toRead)
+            if (r <= 0) break
+            remaining -= r
         }
     }
 }

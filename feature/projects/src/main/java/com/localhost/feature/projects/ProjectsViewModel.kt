@@ -395,7 +395,7 @@ class ProjectsViewModel @Inject constructor(
 
             val projectVenv = File(workDir, ".venv").apply { mkdirs() }
             val wheelsDir = File(File(execPath).parentFile?.parentFile, "wheels")
-            val runtimeProvided = setOf("audioop", "audioop-lts", "cryptography", "pillow", "pil", "psycopg2", "psycopg2-binary", "regex", "cffi", "pycparser")
+            val runtimeProvided = setOf("audioop", "audioop-lts", "cryptography", "pillow", "pil", "psycopg2", "psycopg2-binary", "regex", "cffi", "pycparser", "bcrypt", "lxml", "greenlet")
             val filteredLines = validLines.filter { line ->
                 val pkgName = line.split(Regex("[=<>~! ]"))[0].trim().lowercase()
                 !runtimeProvided.contains(pkgName)
