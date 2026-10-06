@@ -119,6 +119,7 @@ class ManagedProcess(
                     env["PYTHONPATH"] = "${projectSitePackages314.absolutePath}:${projectSitePackages.absolutePath}:${projectSitePackages312.absolutePath}:${workDir.absolutePath}:$basePyPath"
                     env["PYTHONUSERBASE"] = projectVenv.absolutePath
                     env["PYTHONUNBUFFERED"] = "1"
+                    env["WERKZEUG_DEBUG_PIN"] = "off"
                     if (targetDir != null) {
                         val certFile = File(targetDir, "etc/tls/cert.pem")
                         if (certFile.exists()) {
