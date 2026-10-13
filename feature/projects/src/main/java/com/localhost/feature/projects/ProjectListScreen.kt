@@ -1,23 +1,17 @@
 package com.localhost.feature.projects
 
+import com.localhost.core.designsystem.theme.StatusGreen
+import com.localhost.core.designsystem.theme.StatusRed
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import com.localhost.core.designsystem.theme.TextOnAccent
-import com.localhost.core.designsystem.theme.DarkBorderSubtle
-
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,10 +40,18 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DriveFolderUpload
+import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +60,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -121,6 +124,9 @@ fun ProjectListScreen(
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var qrDialogUrl by remember { mutableStateOf<String?>(null) }
+    var showGithubDialog by remember { mutableStateOf(false) }
+    var githubUrlInput by remember { mutableStateOf("") }
+    var githubCustomName by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
 
     val zipImportLauncher = rememberLauncherForActivityResult(
@@ -159,11 +165,11 @@ fun ProjectListScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        AppLogo(size = 28.dp)
+                        AppLogo(size = 22.dp)
                         Text(
                             text = "Projects",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
+                            fontSize = 16.sp,
                             color = TextPrimary
                         )
                         if (runningCount > 0) {
@@ -186,6 +192,15 @@ fun ProjectListScreen(
                 },
                 actions = {
                     IconButton(onClick = {
+                        showGithubDialog = true
+                    }) {
+                        Icon(
+                            Icons.Default.CloudDownload,
+                            contentDescription = "Import from GitHub",
+                            tint = PrimaryAccent
+                        )
+                    }
+                    IconButton(onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         zipImportLauncher.launch("*/*")
                     }) {
@@ -199,7 +214,8 @@ fun ProjectListScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = DarkSurface,
                     titleContentColor = TextPrimary
-                )
+                ),
+                modifier = Modifier.height(48.dp)
             )
         },
         floatingActionButton = {
@@ -287,6 +303,9 @@ fun ProjectListScreen(
                         ProjectCardItem(
                             project = project,
                             onCardClick = { onProjectClick(project.id) },
+                            onStartClick = { viewModel.startProject(project) },
+                            onStopClick = { viewModel.stopProject(project.id) },
+                            onRestartClick = { viewModel.restartProject(project.id) },
                             onQrClick = {
                                 val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
                                 qrDialogUrl = "http://$ip:${project.port}"
@@ -316,6 +335,9 @@ fun ProjectListScreen(
                         ProjectCardItem(
                             project = project,
                             onCardClick = { onProjectClick(project.id) },
+                            onStartClick = { viewModel.startProject(project) },
+                            onStopClick = { viewModel.stopProject(project.id) },
+                            onRestartClick = { viewModel.restartProject(project.id) },
                             onQrClick = {
                                 val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
                                 qrDialogUrl = "http://$ip:${project.port}"
@@ -333,6 +355,81 @@ fun ProjectListScreen(
                 }
             }
         }
+    }
+
+    
+    if (showGithubDialog) {
+        AlertDialog(
+            onDismissRequest = { showGithubDialog = false },
+            containerColor = DarkSurfaceElevated,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Import from GitHub", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Enter repository URL to clone and set up:", color = TextSecondary, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = githubUrlInput,
+                        onValueChange = { githubUrlInput = it },
+                        label = { Text("GitHub Repo URL") },
+                        placeholder = { Text("https://github.com/user/repo", color = TextMuted) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface
+                        )
+                    )
+                    OutlinedTextField(
+                        value = githubCustomName,
+                        onValueChange = { githubCustomName = it },
+                        label = { Text("Project Name (Optional)") },
+                        placeholder = { Text("my-app", color = TextMuted) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (githubUrlInput.isNotBlank()) {
+                            viewModel.importProjectFromGithub(context, githubUrlInput, githubCustomName.takeIf { it.isNotBlank() })
+                            showGithubDialog = false
+                            githubUrlInput = ""
+                            githubCustomName = ""
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Import", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGithubDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
     }
 
     qrDialogUrl?.let { url ->
@@ -479,6 +576,9 @@ private fun HeaderStatusRow(projectsCount: Int) {
 private fun ProjectCardItem(
     project: Project,
     onCardClick: () -> Unit,
+    onStartClick: () -> Unit,
+    onStopClick: () -> Unit,
+    onRestartClick: () -> Unit,
     onQrClick: () -> Unit,
     onOpenBrowser: () -> Unit
 ) {
@@ -541,32 +641,56 @@ private fun ProjectCardItem(
                     }
 
                     if (isRunning) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        IconButton(onClick = onOpenBrowser, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open in Browser", tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(onClick = onOpenBrowser, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open in Browser", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
                         }
-                        IconButton(onClick = onQrClick, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.QrCode, contentDescription = "QR Code", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        IconButton(onClick = onQrClick, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.QrCode, contentDescription = "QR Code", tint = TextSecondary, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "Configure",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = PrimaryAccent
-                    )
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        tint = PrimaryAccent,
-                        modifier = Modifier.size(14.dp)
-                    )
+                    if (isRunning) {
+                        Button(
+                            onClick = onStopClick,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
+                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Stop", color = StatusRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = onRestartClick,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(14.dp))
+                        }
+                    } else {
+                        Button(
+                            onClick = onStartClick,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusGreen.copy(alpha = 0.25f)),
+                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Start", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }

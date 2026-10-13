@@ -15,11 +15,6 @@ import com.localhost.runtime.manager.RuntimeManager
 import com.localhost.runtime.process.ProcessSupervisor
 import com.localhost.tunnel.CloudflareTunnelManager
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -29,6 +24,13 @@ import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 @Singleton
 class LocalhostCli @Inject constructor(
@@ -37,7 +39,8 @@ class LocalhostCli @Inject constructor(
     private val logRepository: LogRepository,
     private val processSupervisor: ProcessSupervisor,
     private val tunnelManager: CloudflareTunnelManager,
-    private val runtimeManager: RuntimeManager
+    private val runtimeManager: RuntimeManager,
+    private val okHttpClient: OkHttpClient
 ) {
     private val json = Json { prettyPrint = true }
     private val rootDirectory: File = context.filesDir.apply { mkdirs() }
@@ -81,7 +84,8 @@ class LocalhostCli @Inject constructor(
         val tokens = parseArgs(cleanCmd)
         if (tokens.isEmpty()) return@withContext ""
 
-        val root = tokens[0].lowercase()
+        val rawRoot = tokens[0]
+        val root = if (rawRoot.startsWith("-") && rawRoot.length > 1) rawRoot.removePrefix("-").lowercase() else rawRoot.lowercase()
         val args = tokens.drop(1)
 
         try {
@@ -126,6 +130,10 @@ class LocalhostCli @Inject constructor(
                 "create" -> handleCreate(args, isJson)
                 "delete" -> handleDeleteProject(args.firstOrNull())
                 "tunnel" -> handleTunnel(args.firstOrNull(), isJson)
+                "curl", "wget" -> handleCurl(args)
+                "chmod" -> handleChmod(args)
+                "composer" -> handleComposer(args)
+                "java" -> handleRuntimeExec(RuntimeType.JAVA, args)
                 "python", "python3" -> handleRuntimeExec(RuntimeType.PYTHON, args)
                 "pip", "pip3" -> handleRuntimeExec(RuntimeType.PYTHON, listOf("-m", "pip") + args)
                 "node" -> handleRuntimeExec(RuntimeType.NODEJS, args)
@@ -169,9 +177,10 @@ class LocalhostCli @Inject constructor(
     }
 
     private fun handleLs(args: List<String>): String {
-        val showAll = args.any { it.contains("a") }
-        val longFormat = args.any { it.contains("l") }
-        val targetPath = args.lastOrNull { !it.startsWith("-") }
+        val isFlag = { s: String -> s.startsWith("-") || s == "a" || s == "l" || s == "la" || s == "al" || s == "lh" }
+        val showAll = args.any { it.contains("a") || it == "a" }
+        val longFormat = args.any { it.contains("l") || it == "l" }
+        val targetPath = args.lastOrNull { !isFlag(it) }
 
         val targetDir = if (targetPath == null) currentDirectory else resolveFile(targetPath)
         if (!targetDir.exists()) return "ls: cannot access '$targetPath': No such file or directory"
@@ -720,4 +729,77 @@ Localhost CLI Commands:
     logs <name|id>             View recent server logs
     tunnel <start|stop|status> Manage Cloudflare tunnel
 """.trimIndent()
+
+
+    private fun handleCurl(args: List<String>): String {
+        if (args.isEmpty()) return "curl: try 'curl --help' or specify a URL"
+        var outputFile: String? = null
+        var url: String? = null
+        var idx = 0
+        while (idx < args.size) {
+            when (args[idx]) {
+                "-o", "--output" -> {
+                    if (idx + 1 < args.size) {
+                        outputFile = args[idx + 1]
+                        idx += 2
+                        continue
+                    }
+                }
+                "-s", "--silent", "-L", "-i" -> {}
+                else -> {
+                    if (!args[idx].startsWith("-") && url == null) {
+                        url = args[idx]
+                    }
+                }
+            }
+            idx++
+        }
+
+        if (url == null) return "curl: no URL specified"
+        val targetUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) "http://$url" else url
+
+        return try {
+            val req = Request.Builder().url(targetUrl).header("User-Agent", "curl/8.4.0").build()
+            val resp = okHttpClient.newCall(req).execute()
+            val bodyBytes = resp.body?.bytes() ?: ByteArray(0)
+            if (outputFile != null) {
+                val f = resolveFile(outputFile)
+                f.writeBytes(bodyBytes)
+                "Downloaded ${bodyBytes.size} bytes to ${f.name}"
+            } else {
+                val text = String(bodyBytes)
+                if (text.length > 8192) text.take(8192) + "\n... [truncated]" else text
+            }
+        } catch (e: Exception) {
+            "curl: Failed: ${e.message}"
+        }
+    }
+
+    private fun handleChmod(args: List<String>): String {
+        if (args.size < 2) return "chmod: missing operand"
+        val mode = args[0]
+        val fileArg = args[1]
+        val target = resolveFile(fileArg)
+        if (!target.exists()) return "chmod: cannot access '$fileArg': No such file or directory"
+        if (mode.contains("+x") || mode == "755" || mode == "777") {
+            target.setExecutable(true, false)
+        }
+        if (mode.contains("+r") || mode == "644" || mode == "755") {
+            target.setReadable(true, false)
+        }
+        if (mode.contains("+w")) {
+            target.setWritable(true, false)
+        }
+        return ""
+    }
+
+    private suspend fun handleComposer(args: List<String>): String {
+        val phpPath = runtimeManager.getExecutablePath(RuntimeType.PHP)
+            ?: return "composer: PHP runtime is not installed. Install PHP from Settings -> Runtimes."
+        val composerPhar = File(context.filesDir, "bin/composer.phar")
+        if (!composerPhar.exists()) {
+            return "composer: composer.phar not found. Download Composer from Settings or use composer download."
+        }
+        return handleCustomExec(listOf(phpPath, composerPhar.absolutePath) + args)
+    }
 }

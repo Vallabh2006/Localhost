@@ -11,10 +11,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
@@ -60,6 +63,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
@@ -133,12 +137,12 @@ import com.localhost.core.designsystem.theme.TextOnAccent
 import com.localhost.core.designsystem.theme.TextPrimary
 import com.localhost.core.designsystem.theme.TextSecondary
 import com.localhost.core.model.ProjectSnapshot
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -171,6 +175,10 @@ fun FileExplorerScreen(
     var isCreatingFolder by remember { mutableStateOf(false) }
     var newFileName by remember { mutableStateOf("") }
     var showVcsSheet by remember { mutableStateOf(false) }
+    val recentPaths by viewModel.recentPaths.collectAsState()
+    var renamingFile by remember { mutableStateOf<File?>(null) }
+    var renameInput by remember { mutableStateOf("") }
+    var detailsFile by remember { mutableStateOf<File?>(null) }
     var showCommitDialog by remember { mutableStateOf(false) }
     var commitMessageInput by remember { mutableStateOf("") }
     var snapshotToRollback by remember { mutableStateOf<ProjectSnapshot?>(null) }
@@ -223,7 +231,7 @@ fun FileExplorerScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("File Explorer", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = TextPrimary)
+                    Text("File Explorer", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 },
                 actions = {
                     if (currentProject != null) {
@@ -235,7 +243,8 @@ fun FileExplorerScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface),
+                modifier = Modifier.height(48.dp)
             )
         },
         floatingActionButton = {
@@ -757,6 +766,7 @@ private fun ProjectSelectorHeader(
 private fun AddressBar(
     currentDir: File?,
     projectDir: String,
+    recentPaths: List<String> = emptyList(),
     onNavigateTo: (File) -> Unit,
     onNavigateUp: () -> Unit,
     onNavigateToPath: (String) -> Unit,
@@ -836,6 +846,31 @@ private fun AddressBar(
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(Icons.Default.Close, contentDescription = "Cancel", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                }
+            }
+            if (recentPaths.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Recents:", fontSize = 11.sp, color = TextMuted)
+                    recentPaths.forEach { rPath ->
+                        Surface(
+                            color = DarkSurfaceElevated,
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.clickable {
+                                textInput = rPath
+                                onNavigateToPath(rPath)
+                                isEditMode = false
+                            }
+                        ) {
+                            Text(rPath, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = PrimaryAccent, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
                 }
             }
         } else {
@@ -1002,9 +1037,12 @@ private fun ClipboardStatusBar(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun FileListContent(
     files: List<UiFile>,
     onFileClick: (UiFile) -> Unit,
+    onRenameClick: (UiFile) -> Unit = {},
+    onDetailsClick: (UiFile) -> Unit = {},
     onCutClick: (UiFile) -> Unit,
     onCopyClick: (UiFile) -> Unit,
     onDownloadClick: (UiFile) -> Unit,
@@ -1044,10 +1082,17 @@ private fun FileListContent(
                     dateFormat.format(Date(fileItem.lastModified))
                 }
 
+                val haptics = LocalHapticFeedback.current
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onFileClick(fileItem) },
+                        .combinedClickable(
+                            onClick = { onFileClick(fileItem) },
+                            onLongClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                menuExpanded = true
+                            }
+                        ),
                     shape = RoundedCornerShape(10.dp),
                     colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = BorderStroke(1.dp, DarkBorderSubtle)
@@ -1081,13 +1126,6 @@ private fun FileListContent(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { onDownloadClick(fileItem) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(Icons.Default.FileDownload, contentDescription = "Download", tint = PrimaryAccent, modifier = Modifier.size(18.dp))
-                            }
-
                             Box {
                                 IconButton(
                                     onClick = { menuExpanded = true },
@@ -1101,6 +1139,30 @@ private fun FileListContent(
                                     onDismissRequest = { menuExpanded = false },
                                     modifier = Modifier.background(DarkSurfaceElevated)
                                 ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Rename", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onRenameClick(fileItem)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Details", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onDetailsClick(fileItem)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(if (fileItem.isDirectory) "Download (Zip)" else "Download", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onDownloadClick(fileItem)
+                                        }
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("Cut", color = TextPrimary) },
                                         leadingIcon = { Icon(Icons.Default.ContentCut, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
@@ -1170,6 +1232,7 @@ fun FileEditorAndViewerScreen(
 ) {
     var textInput by remember(content) { mutableStateOf(content) }
     var svgPreviewMode by remember { mutableStateOf(true) }
+    var markdownPreviewMode by remember { mutableStateOf(false) }
     var isSavedRecently by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
@@ -1202,6 +1265,11 @@ fun FileEditorAndViewerScreen(
                         if (fileType == FileType.SVG) {
                             TextButton(onClick = { svgPreviewMode = !svgPreviewMode }) {
                                 Text(if (svgPreviewMode) "Source" else "Preview", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (file.extension.equals("md", ignoreCase = true)) {
+                            TextButton(onClick = { markdownPreviewMode = !markdownPreviewMode }) {
+                                Text(if (markdownPreviewMode) "Edit" else "Preview", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -1250,10 +1318,15 @@ fun FileEditorAndViewerScreen(
         ) {
             when (fileType) {
                 FileType.TEXT -> {
-                    CodeTextEditor(
-                        text = textInput,
-                        onTextChange = { textInput = it }
-                    )
+                    if (file.extension.equals("md", ignoreCase = true) && markdownPreviewMode) {
+                        MarkdownPreviewView(content = textInput)
+                    } else {
+                        CodeTextEditor(
+                            text = textInput,
+                            fileExtension = file.extension,
+                            onTextChange = { textInput = it }
+                        )
+                    }
                 }
                 FileType.IMAGE -> {
                     ImageViewer(file = file, bitmap = imageBitmap)
@@ -1289,48 +1362,203 @@ fun FileEditorAndViewerScreen(
 }
 
 @Composable
+private fun MarkdownPreviewView(content: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        val lines = content.lines()
+        var inCodeBlock = false
+        val codeBlockLines = mutableListOf<String>()
+
+        lines.forEach { line ->
+            when {
+                line.startsWith("```") -> {
+                    if (inCodeBlock) {
+                        Surface(
+                            color = CodeBackground,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = codeBlockLines.joinToString("\n"),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = TextPrimary,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                        codeBlockLines.clear()
+                        inCodeBlock = false
+                    } else {
+                        inCodeBlock = true
+                    }
+                }
+                inCodeBlock -> {
+                    codeBlockLines.add(line)
+                }
+                line.startsWith("# ") -> {
+                    Text(
+                        text = line.removePrefix("# ").trim(),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PrimaryAccent,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                    )
+                }
+                line.startsWith("## ") -> {
+                    Text(
+                        text = line.removePrefix("## ").trim(),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                    )
+                }
+                line.startsWith("### ") -> {
+                    Text(
+                        text = line.removePrefix("### ").trim(),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = PrimaryAccent,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                line.startsWith("- ") || line.startsWith("* ") -> {
+                    Row(modifier = Modifier.padding(start = 8.dp)) {
+                        Text("• ", color = PrimaryAccent, fontWeight = FontWeight.Bold)
+                        Text(line.substring(2).trim(), color = TextPrimary, fontSize = 13.sp)
+                    }
+                }
+                line.startsWith("> ") -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DarkSurfaceElevated)
+                            .border(BorderStroke(2.dp, PrimaryAccent), RoundedCornerShape(4.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(line.removePrefix("> ").trim(), color = TextSecondary, fontSize = 13.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                    }
+                }
+                line.isBlank() -> {
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                else -> {
+                    Text(line, color = TextPrimary, fontSize = 13.sp, lineHeight = 20.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CodeTextEditor(
     text: String,
+    fileExtension: String = "",
     onTextChange: (String) -> Unit
 ) {
     val lines = remember(text) { text.lines().size.coerceAtLeast(1) }
     val lineNumbersText = remember(lines) { (1..lines).joinToString("\n") }
     val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
+    val syntaxHighlighter = remember(fileExtension) { SyntaxHighlighter(fileExtension) }
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CodeBackground)
-            .verticalScroll(verticalScrollState)
-            .padding(top = 10.dp, bottom = 16.dp, start = 8.dp, end = 8.dp)
-    ) {
-        Text(
-            text = lineNumbersText,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 13.sp,
-            lineHeight = 20.sp,
-            color = TextMuted.copy(alpha = 0.45f),
-            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+    val tokens = remember(text) { SyntaxHighlighter.extractTokens(text) }
+    var currentWord by remember { mutableStateOf("") }
+
+    val suggestions = remember(currentWord, tokens) {
+        if (currentWord.length >= 2) {
+            tokens.filter { it.startsWith(currentWord, ignoreCase = true) && !it.equals(currentWord, ignoreCase = true) }
+                .take(6)
+        } else {
+            emptyList()
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(CodeBackground)) {
+        if (suggestions.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DarkSurfaceElevated)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Suggestions:", fontSize = 11.sp, color = TextMuted)
+                suggestions.forEach { suggestion ->
+                    Surface(
+                        color = PrimaryAccentContainer,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.clickable {
+                            val lastIdx = text.lastIndexOf(currentWord)
+                            if (lastIdx != -1) {
+                                val newText = text.substring(0, lastIdx) + suggestion + text.substring(lastIdx + currentWord.length)
+                                onTextChange(newText)
+                                currentWord = ""
+                            }
+                        }
+                    ) {
+                        Text(
+                            text = suggestion,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            color = PrimaryAccent,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
             modifier = Modifier
-                .width(42.dp)
-                .padding(end = 10.dp)
-        )
-
-        BasicTextField(
-            value = text,
-            onValueChange = onTextChange,
-            textStyle = TextStyle(
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(verticalScrollState)
+                .padding(top = 10.dp, bottom = 16.dp, start = 8.dp, end = 8.dp)
+        ) {
+            Text(
+                text = lineNumbersText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
                 lineHeight = 20.sp,
-                color = TextPrimary
-            ),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(PrimaryAccent),
-            modifier = Modifier
-                .weight(1f)
-                .horizontalScroll(horizontalScrollState)
-        )
+                color = TextMuted.copy(alpha = 0.45f),
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier
+                    .width(42.dp)
+                    .padding(end = 10.dp)
+            )
+
+            BasicTextField(
+                value = text,
+                onValueChange = { newText ->
+                    onTextChange(newText)
+                    val lastWord = newText.takeLastWhile { it.isLetterOrDigit() || it == '_' }
+                    currentWord = lastWord
+                },
+                visualTransformation = syntaxHighlighter,
+                textStyle = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = TextPrimary
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(PrimaryAccent),
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(horizontalScrollState)
+            )
+        }
     }
 }
 
@@ -1362,8 +1590,25 @@ private fun ImageViewer(file: File, bitmap: Bitmap?) {
                         <head>
                         <meta name="viewport" content="width=device-width, initial-scale=1.0">
                         <style>
-                          body { margin: 0; background: #161B22; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
-                          img { max-width: 95%; max-height: 95%; object-fit: contain; border-radius: 8px; }
+                          html, body {
+                            height: 100%;
+                            width: 100%;
+                            margin: 0;
+                            padding: 0;
+                            background-color: #161B22;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            overflow: hidden;
+                          }
+                          img {
+                            max-width: 95%;
+                            max-height: 95%;
+                            object-fit: contain;
+                            border-radius: 8px;
+                            display: block;
+                            margin: auto;
+                          }
                         </style>
                         </head>
                         <body>

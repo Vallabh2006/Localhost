@@ -1,5 +1,6 @@
 package com.localhost.feature.files
 
+import kotlinx.coroutines.flow.update
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -61,6 +62,9 @@ class FilesViewModel @Inject constructor(
 
     val projects: StateFlow<List<Project>> = projectRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _recentPaths = MutableStateFlow<List<String>>(emptyList())
+    val recentPaths = _recentPaths.asStateFlow()
 
     private val _selectedProjectId = MutableStateFlow<String?>(null)
     val selectedProjectId = _selectedProjectId.asStateFlow()
@@ -125,6 +129,10 @@ class FilesViewModel @Inject constructor(
     fun navigateTo(dir: File) {
         _currentDir.value = dir
         loadFiles(dir)
+        val proj = projects.value.firstOrNull { it.id == _selectedProjectId.value } ?: return
+        val root = File(proj.workingDir)
+        val rel = if (dir.canonicalPath == root.canonicalPath) "/" else "/" + dir.canonicalPath.removePrefix(root.canonicalPath).trimStart('/')
+        _recentPaths.update { (listOf(rel) + it).distinct().take(8) }
     }
 
     fun navigateToPath(pathString: String) {
@@ -386,6 +394,24 @@ class FilesViewModel @Inject constructor(
             if (isDir) target.mkdirs() else target.createNewFile()
             loadFiles(parent)
             _message.value = if (isDir) "Created folder $name" else "Created file $name"
+        }
+    }
+
+        fun renameFile(file: File, newName: String) {
+        if (newName.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = File(file.parentFile, newName.trim())
+            if (target.exists()) {
+                _message.value = "A file or folder with that name already exists"
+                return@launch
+            }
+            val success = file.renameTo(target)
+            if (success) {
+                _currentDir.value?.let { loadFiles(it) }
+                _message.value = "Renamed to ${target.name}"
+            } else {
+                _message.value = "Failed to rename"
+            }
         }
     }
 

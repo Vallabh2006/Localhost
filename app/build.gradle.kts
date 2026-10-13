@@ -90,7 +90,6 @@ dependencies {
     implementation(project(":feature:monitor"))
     implementation(project(":feature:tunnel"))
     implementation(project(":feature:settings"))
-    implementation(project(":feature:supabase"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

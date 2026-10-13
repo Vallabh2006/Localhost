@@ -1,18 +1,5 @@
 package com.localhost.feature.projects
 
-import kotlinx.coroutines.launch
-
-import androidx.compose.foundation.Image
-import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.ui.graphics.asImageBitmap
-import com.localhost.core.common.NetworkUtils
-import com.localhost.core.common.QrCodeGenerator
-
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -21,6 +8,7 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -48,14 +36,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
@@ -97,11 +90,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -113,6 +108,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.localhost.core.common.NetworkUtils
+import com.localhost.core.common.QrCodeGenerator
 import com.localhost.core.designsystem.component.StatusChip
 import com.localhost.core.designsystem.theme.DarkBackground
 import com.localhost.core.designsystem.theme.DarkBorder
@@ -138,6 +135,7 @@ import com.localhost.core.model.TunnelStatus
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -158,7 +156,7 @@ fun ProjectDetailScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var qrDialogUrl by remember { mutableStateOf<String?>(null) }
-    val tabs = listOf("Overview", "Snapshots", "Packages", "Env Vars", "Control")
+    val tabs = listOf("Overview", "Snapshots", "Packages", "Control")
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -244,11 +242,27 @@ fun ProjectDetailScreen(
                 actions = {
                     if (project.status == ProjectStatus.RUNNING) {
                         IconButton(onClick = {
+                            viewModel.stopProject(project.id)
+                        }) {
+                            Icon(Icons.Default.Stop, contentDescription = "Stop", tint = StatusRed)
+                        }
+                        IconButton(onClick = {
+                            viewModel.restartProject(project.id)
+                        }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = PrimaryAccent)
+                        }
+                        IconButton(onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
                             qrDialogUrl = "http://$ip:${project.port}"
                         }) {
                             Icon(Icons.Default.QrCode, contentDescription = "QR Code & Link", tint = PrimaryAccent)
+                        }
+                    } else {
+                        IconButton(onClick = {
+                            viewModel.startProject(project)
+                        }) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Start", tint = StatusGreen)
                         }
                     }
                     IconButton(onClick = {
@@ -376,8 +390,7 @@ fun ProjectDetailScreen(
                             0 -> OverviewTab(project = project, onOpenLogs = onOpenLogs, onOpenFiles = onOpenFiles, onExportZip = { shareExportedZip() })
                             1 -> SnapshotsTab(project = project, viewModel = viewModel)
                             2 -> PackagesTab(project = project, viewModel = viewModel)
-                            3 -> EnvironmentTab(project = project, viewModel = viewModel)
-                            4 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                            3 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
                         }
                     }
                 }
@@ -442,8 +455,7 @@ fun ProjectDetailScreen(
                     0 -> OverviewTab(project = project, onOpenLogs = onOpenLogs, onOpenFiles = onOpenFiles, onExportZip = { shareExportedZip() })
                     1 -> SnapshotsTab(project = project, viewModel = viewModel)
                     2 -> PackagesTab(project = project, viewModel = viewModel)
-                    3 -> EnvironmentTab(project = project, viewModel = viewModel)
-                    4 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                    3 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
                 }
             }
         }
@@ -1559,251 +1571,6 @@ private fun PackagesTab(
             },
             dismissButton = {
                 TextButton(onClick = { packageToDelete = null }) {
-                    Text("Cancel", color = TextSecondary)
-                }
-            }
-        )
-    }
-}
-
-@Composable
-private fun EnvironmentTab(
-    project: Project,
-    viewModel: ProjectsViewModel
-) {
-    var newKey by remember { mutableStateOf("") }
-    var newValue by remember { mutableStateOf("") }
-    var isSecret by remember { mutableStateOf(false) }
-    var showRawEnvDialog by remember { mutableStateOf(false) }
-    var rawEnvText by remember { mutableStateOf("") }
-    var visibleKeys by remember { mutableStateOf(setOf<String>()) }
-    val haptics = LocalHapticFeedback.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            border = BorderStroke(1.dp, DarkBorder)
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Add Variable", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-
-                OutlinedTextField(
-                    value = newKey,
-                    onValueChange = { newKey = it },
-                    placeholder = { Text("KEY (e.g. API_KEY)", color = TextMuted) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = PrimaryAccent,
-                        unfocusedBorderColor = DarkBorderSubtle,
-                        cursorColor = PrimaryAccent,
-                        focusedContainerColor = DarkSurfaceElevated,
-                        unfocusedContainerColor = DarkSurfaceElevated
-                    )
-                )
-
-                OutlinedTextField(
-                    value = newValue,
-                    onValueChange = { newValue = it },
-                    placeholder = { Text("VALUE", color = TextMuted) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = PrimaryAccent,
-                        unfocusedBorderColor = DarkBorderSubtle,
-                        cursorColor = PrimaryAccent,
-                        focusedContainerColor = DarkSurfaceElevated,
-                        unfocusedContainerColor = DarkSurfaceElevated
-                    )
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Switch(
-                            checked = isSecret,
-                            onCheckedChange = { isSecret = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = TextOnAccent,
-                                checkedTrackColor = PrimaryAccent,
-                                uncheckedThumbColor = TextMuted,
-                                uncheckedTrackColor = DarkSurfaceElevated
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Mask Value (Secret)", color = TextSecondary, fontSize = 13.sp)
-                    }
-
-                    Button(
-                        onClick = {
-                            if (newKey.isNotBlank()) {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.addEnvironmentVar(project.id, newKey, newValue, isSecret)
-                                newKey = ""
-                                newValue = ""
-                                isSecret = false
-                            }
-                        },
-                        enabled = newKey.isNotBlank(),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
-                    ) {
-                        Text("Add", color = TextOnAccent, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Environment Variables (${project.envVars.size})",
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                color = TextPrimary,
-                modifier = Modifier.weight(1f).padding(end = 8.dp)
-            )
-            OutlinedButton(
-                onClick = { showRawEnvDialog = true },
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, DarkBorderSubtle),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Icon(Icons.Default.UploadFile, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Import .env", color = TextPrimary, fontSize = 12.sp)
-            }
-        }
-
-        if (project.envVars.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No environment variables configured", color = TextMuted, fontSize = 13.sp)
-            }
-        } else {
-            project.envVars.forEach { v ->
-                val isMasked = v.isSecret && !visibleKeys.contains(v.key)
-                Card(
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
-                    border = BorderStroke(1.dp, DarkBorderSubtle)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(v.key, fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                if (isMasked) "************" else v.value,
-                                color = TextSecondary,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (v.isSecret) {
-                                IconButton(
-                                    onClick = {
-                                        visibleKeys = if (visibleKeys.contains(v.key)) visibleKeys - v.key else visibleKeys + v.key
-                                    },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        if (visibleKeys.contains(v.key)) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = "Toggle Visibility",
-                                        tint = TextMuted,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            IconButton(
-                                onClick = {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    viewModel.removeEnvironmentVar(project.id, v.key)
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = StatusRed, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showRawEnvDialog) {
-        AlertDialog(
-            onDismissRequest = { showRawEnvDialog = false },
-            containerColor = DarkSurfaceElevated,
-            title = { Text("Import .env File Content", fontWeight = FontWeight.Bold, color = TextPrimary) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Paste lines in KEY=VALUE format:", color = TextSecondary, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = rawEnvText,
-                        onValueChange = { rawEnvText = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        placeholder = { Text("PORT=8000\nDATABASE_URL=postgres://...\nDEBUG=true", color = TextMuted, fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = PrimaryAccent,
-                            unfocusedBorderColor = DarkBorderSubtle,
-                            cursorColor = PrimaryAccent,
-                            focusedContainerColor = DarkSurface,
-                            unfocusedContainerColor = DarkSurface
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.importRawEnv(project.id, rawEnvText)
-                        rawEnvText = ""
-                        showRawEnvDialog = false
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = PrimaryAccent)
-                ) {
-                    Text("Import", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRawEnvDialog = false }) {
                     Text("Cancel", color = TextSecondary)
                 }
             }

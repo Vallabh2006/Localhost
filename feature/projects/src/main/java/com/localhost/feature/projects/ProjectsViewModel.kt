@@ -18,6 +18,10 @@ import com.localhost.runtime.process.ProcessSupervisor
 import com.localhost.runtime.templates.TemplateProvider
 import com.localhost.tunnel.CloudflareTunnelManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,10 +31,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
-import java.util.UUID
-import javax.inject.Inject
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 @HiltViewModel
 class ProjectsViewModel @Inject constructor(
@@ -39,7 +41,8 @@ class ProjectsViewModel @Inject constructor(
     private val templateProvider: TemplateProvider,
     private val runtimeManager: RuntimeManager,
     private val tunnelManager: CloudflareTunnelManager,
-    private val snapshotRepository: SnapshotRepository
+    private val snapshotRepository: SnapshotRepository,
+    private val okHttpClient: OkHttpClient
 ) : ViewModel() {
 
     val projects: StateFlow<List<Project>> = projectRepository.observeAll()
@@ -335,6 +338,177 @@ class ProjectsViewModel @Inject constructor(
                 onComplete?.invoke(true)
             } catch (e: Exception) {
                 _message.value = "Import failed: ${e.message}"
+                onComplete?.invoke(false)
+            }
+        }
+    }
+
+    
+    suspend fun exportProjectToUri(
+        context: Context,
+        project: Project,
+        destinationUri: Uri,
+        excludeDependencies: Boolean = true
+    ): Boolean = withContext(Dispatchers.IO) {
+        val projectDir = File(project.workingDir)
+        if (!projectDir.exists()) {
+            _message.value = "Project directory not found"
+            return@withContext false
+        }
+        try {
+            context.contentResolver.openOutputStream(destinationUri)?.use { outputStream ->
+                java.util.zip.ZipOutputStream(outputStream).use { zos ->
+                    val excludeSet = if (excludeDependencies) {
+                        setOf(".venv", "node_modules", "vendor", ".git", ".idea", ".vscode", "__pycache__")
+                    } else {
+                        setOf(".git")
+                    }
+                    projectDir.walkTopDown()
+                        .filter { file ->
+                            val relPath = file.relativeTo(projectDir).path
+                            !excludeSet.any { excluded -> relPath == excluded || relPath.startsWith("$excluded/") || relPath.startsWith("$excluded\\") }
+                        }
+                        .forEach { file ->
+                            val entryName = file.relativeTo(projectDir).path.replace("\\", "/")
+                            if (file.isDirectory) {
+                                if (entryName.isNotEmpty()) {
+                                    zos.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
+                                    zos.closeEntry()
+                                }
+                            } else {
+                                zos.putNextEntry(java.util.zip.ZipEntry(entryName))
+                                file.inputStream().use { it.copyTo(zos) }
+                                zos.closeEntry()
+                            }
+                        }
+                }
+            }
+            _message.value = "Exported ${project.name} successfully"
+            true
+        } catch (e: Exception) {
+            _message.value = "Export failed: ${e.message}"
+            false
+        }
+    }
+
+    fun importProjectFromGithub(
+        context: Context,
+        repoUrl: String,
+        customName: String? = null,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            try {
+                _message.value = "Connecting to GitHub..."
+                val cleanUrl = repoUrl.trim().removeSuffix(".git").removeSuffix("/")
+                val cleaned = cleanUrl.replace("https://github.com/", "").replace("http://github.com/", "").trim()
+                val parts = cleaned.split("/")
+                if (parts.size < 2) {
+                    _message.value = "Invalid GitHub repository URL"
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+                val owner = parts[0]
+                val repo = parts[1]
+                val branch = if (parts.size >= 4 && parts[2] == "tree") parts[3] else "main"
+
+                val projectName = customName?.takeIf { it.isNotBlank() } ?: repo
+
+                val projectsDir = File(context.filesDir, "projects")
+                var targetDir = File(projectsDir, projectName)
+                var count = 1
+                while (targetDir.exists()) {
+                    targetDir = File(projectsDir, "${projectName}_$count")
+                    count++
+                }
+                targetDir.mkdirs()
+
+                val downloadSuccess = withContext(Dispatchers.IO) {
+                    val candidateUrls = listOf(
+                        "https://github.com/$owner/$repo/archive/refs/heads/$branch.zip",
+                        "https://github.com/$owner/$repo/archive/refs/heads/master.zip",
+                        "https://api.github.com/repos/$owner/$repo/zipball/$branch"
+                    )
+                    var downloaded = false
+                    val tempZip = File(context.cacheDir, "github_${System.currentTimeMillis()}.zip")
+
+                    for (url in candidateUrls) {
+                        try {
+                            val req = Request.Builder()
+                                .url(url)
+                                .header("User-Agent", "Localhost-App")
+                                .build()
+                            val resp = okHttpClient.newCall(req).execute()
+                            if (resp.isSuccessful) {
+                                resp.body?.byteStream()?.use { input ->
+                                    FileOutputStream(tempZip).use { output ->
+                                        input.copyTo(output)
+                                    }
+                                }
+                                downloaded = true
+                                break
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    if (downloaded && tempZip.exists()) {
+                        try {
+                            java.io.FileInputStream(tempZip).use { fis ->
+                                FileUtils.unzip(fis, targetDir)
+                            }
+                            tempZip.delete()
+                            true
+                        } catch (e: Exception) {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+
+                if (!downloadSuccess) {
+                    _message.value = "Failed to download GitHub repository"
+                    onComplete?.invoke(false)
+                    return@launch
+                }
+
+                withContext(Dispatchers.IO) {
+                    var rootFiles = targetDir.listFiles()
+                    while (rootFiles != null && rootFiles.size == 1 && rootFiles[0].isDirectory) {
+                        val singleFolder = rootFiles[0]
+                        singleFolder.listFiles()?.forEach { child ->
+                            val dest = File(targetDir, child.name)
+                            if (!dest.exists()) {
+                                child.renameTo(dest)
+                            }
+                        }
+                        singleFolder.deleteRecursively()
+                        rootFiles = targetDir.listFiles()
+                    }
+                }
+
+                val (runtime, startCmd) = detectRuntimeFromDirectory(targetDir)
+                val allExisting = projectRepository.getAll()
+                val usedPorts = allExisting.map { it.port }.toSet()
+                var port = runtime.defaultPort
+                while (usedPorts.contains(port)) {
+                    port++
+                }
+
+                val newProject = Project(
+                    id = UUID.randomUUID().toString(),
+                    name = targetDir.name,
+                    runtime = runtime,
+                    port = port,
+                    workingDir = targetDir.absolutePath,
+                    startupCommand = startCmd
+                )
+
+                projectRepository.save(newProject)
+                _message.value = "Imported GitHub project: ${newProject.name} (${runtime.displayName})"
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                _message.value = "GitHub import error: ${e.message}"
                 onComplete?.invoke(false)
             }
         }

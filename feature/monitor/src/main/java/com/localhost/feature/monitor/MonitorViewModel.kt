@@ -1,6 +1,10 @@
 package com.localhost.feature.monitor
 
 import android.content.Context
+import android.net.TrafficStats
+import android.os.BatteryManager
+import android.os.Build
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localhost.core.common.NetworkDiagnostics
@@ -72,24 +76,46 @@ class MonitorViewModel @Inject constructor(
         viewModelScope.launch {
             while (isActive) {
                 val (freeStorage, totalStorage) = ProcessMetricsSampler.getStorageMetrics(context)
+                val (availRam, totalRam) = ProcessMetricsSampler.getDeviceMemory(context)
                 val rt = Runtime.getRuntime()
-                val totalMem = rt.totalMemory()
-                val freeMem = rt.freeMemory()
+                val heapUsed = (rt.totalMemory() - rt.freeMemory()).coerceAtLeast(0L)
+                val heapTotal = rt.totalMemory()
 
                 val currentProjects = projectRepository.getAll()
-                val runningCount = currentProjects.count { it.status == ProjectStatus.RUNNING }
+                val runningList = currentProjects.filter { it.status == ProjectStatus.RUNNING }
+                val runningCount = runningList.size
+                val activePorts = runningList.map { it.port }
+
+                val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                val batteryLevel = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.coerceIn(0, 100) ?: 100
+                val isCharging = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) bm?.isCharging == true else false
+
+                val totalRx = TrafficStats.getTotalRxBytes().coerceAtLeast(0L)
+                val totalTx = TrafficStats.getTotalTxBytes().coerceAtLeast(0L)
+                val uptime = SystemClock.elapsedRealtime() / 1000L
+                val cpuUsage = ProcessMetricsSampler.getSystemCpuUsage()
+                val cpuCores = Runtime.getRuntime().availableProcessors()
 
                 _systemMetrics.value = SystemMetrics(
                     timestamp = System.currentTimeMillis(),
-                    totalCpuPercent = (runningCount * 3.8 + 1.2).coerceAtMost(100.0),
-                    availableMemoryBytes = freeMem,
-                    totalMemoryBytes = totalMem,
+                    totalCpuPercent = cpuUsage,
+                    cpuCores = cpuCores,
+                    availableMemoryBytes = availRam,
+                    totalMemoryBytes = totalRam,
+                    appHeapUsedBytes = heapUsed,
+                    appHeapTotalBytes = heapTotal,
                     freeStorageBytes = freeStorage,
                     totalStorageBytes = totalStorage,
-                    runningProjectsCount = runningCount
+                    batteryPercent = batteryLevel,
+                    isCharging = isCharging,
+                    runningProjectsCount = runningCount,
+                    activePorts = activePorts,
+                    networkRxBytes = totalRx,
+                    networkTxBytes = totalTx,
+                    uptimeSeconds = uptime
                 )
                 _diagnostics.value = NetworkUtils.getDiagnostics(context)
-                delay(2500)
+                delay(2000)
             }
         }
     }

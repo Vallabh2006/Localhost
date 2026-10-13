@@ -82,8 +82,6 @@ import com.localhost.feature.projects.ProjectListScreen
 import com.localhost.feature.projects.ProjectsViewModel
 import com.localhost.feature.settings.SettingsScreen
 import com.localhost.feature.settings.SettingsViewModel
-import com.localhost.feature.supabase.SupabaseScreen
-import com.localhost.feature.supabase.SupabaseViewModel
 import com.localhost.feature.tunnel.TunnelScreen
 import com.localhost.feature.tunnel.TunnelViewModel
 import dagger.hilt.android.AndroidEntryPoint
@@ -99,7 +97,6 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector?
     data object ProjectDetail : Screen("project_detail/{id}", "Project Detail")
     data object Logs : Screen("logs?projectId={projectId}", "Logs")
     data object Files : Screen("files?projectId={projectId}", "Files")
-    data object Supabase : Screen("supabase", "Supabase")
 }
 
 @AndroidEntryPoint
@@ -367,10 +364,6 @@ fun MainApp() {
                 SettingsScreen(viewModel = vm)
             }
 
-            composable(Screen.Supabase.route) {
-                val vm: SupabaseViewModel = hiltViewModel()
-                SupabaseScreen(viewModel = vm)
-            }
         }
     }
 }

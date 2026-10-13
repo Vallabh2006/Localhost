@@ -1,6 +1,7 @@
 package com.localhost.app
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -13,11 +14,15 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.localhost.core.data.repository.SettingsRepository
+import com.localhost.core.model.TunnelStatus
 import com.localhost.runtime.process.ProcessSupervisor
+import com.localhost.tunnel.CloudflareTunnelManager
+import com.localhost.tunnel.NginxManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -31,31 +36,53 @@ class SupervisorService : Service() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    @Inject
+    lateinit var cloudflareTunnelManager: CloudflareTunnelManager
+
+    @Inject
+    lateinit var nginxManager: NginxManager
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var isForegroundActive = false
 
     override fun onCreate() {
         super.onCreate()
         try {
-            val notification = createNotification(0)
-            val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            val isServerRunning = processSupervisor.runningCount.value > 0
+            val isTunnelActive = cloudflareTunnelManager.tunnelStatus.value == TunnelStatus.CONNECTED ||
+                nginxManager.proxyConfig.value.isRunning
+            if (isServerRunning || isTunnelActive) {
+                val notification = createNotification(
+                    processSupervisor.runningCount.value,
+                    cloudflareTunnelManager.tunnelStatus.value == TunnelStatus.CONNECTED,
+                    nginxManager.proxyConfig.value.isRunning
+                )
+                val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                } else {
+                    0
+                }
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgType)
+                isForegroundActive = true
             } else {
-                0
+                val notification = createNotification(0, false, false)
+                val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                } else {
+                    0
+                }
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgType)
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                isForegroundActive = false
             }
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgType)
         } catch (_: Exception) {}
         observeLocks()
-        observeRunningCount()
+        observeActiveState()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP_ALL) {
-            scope.launch {
-                processSupervisor.stopAll()
-            }
-        }
         return START_STICKY
     }
 
@@ -66,12 +93,43 @@ class SupervisorService : Service() {
         super.onDestroy()
     }
 
-    private fun observeRunningCount() {
+    private fun observeActiveState() {
         scope.launch {
-            processSupervisor.runningCount.collect { count ->
-                val notification = createNotification(count)
-                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-                manager.notify(NOTIFICATION_ID, notification)
+            combine(
+                processSupervisor.runningCount,
+                cloudflareTunnelManager.tunnelStatus,
+                nginxManager.proxyConfig
+            ) { count, tunnelStatus, proxyConfig ->
+                Triple(count, tunnelStatus == TunnelStatus.CONNECTED, proxyConfig.isRunning)
+            }.collect { (count, isCfRunning, isNginxRunning) ->
+                val isTunnelRunning = isCfRunning || isNginxRunning
+                val isAnyActive = count > 0 || isTunnelRunning
+
+                if (isAnyActive) {
+                    val notification = createNotification(count, isCfRunning, isNginxRunning)
+                    val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    } else {
+                        0
+                    }
+                    try {
+                        ServiceCompat.startForeground(this@SupervisorService, NOTIFICATION_ID, notification, fgType)
+                        isForegroundActive = true
+                    } catch (_: Exception) {
+                        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        manager.notify(NOTIFICATION_ID, notification)
+                    }
+                } else {
+                    if (isForegroundActive) {
+                        try {
+                            ServiceCompat.stopForeground(this@SupervisorService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                        } catch (_: Exception) {
+                            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                            manager.cancel(NOTIFICATION_ID)
+                        }
+                        isForegroundActive = false
+                    }
+                }
             }
         }
     }
@@ -113,7 +171,7 @@ class SupervisorService : Service() {
         } catch (_: Exception) {}
     }
 
-    private fun createNotification(runningCount: Int): Notification {
+    private fun createNotification(runningCount: Int, isCfRunning: Boolean, isNginxRunning: Boolean): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -122,30 +180,32 @@ class SupervisorService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val stopAllIntent = Intent(this, SupervisorService::class.java).apply {
-            action = ACTION_STOP_ALL
+        val title = when {
+            runningCount > 0 && (isCfRunning || isNginxRunning) -> "Localhost Active"
+            runningCount > 0 -> "Localhost Server Active"
+            isCfRunning -> "Cloudflare Tunnel Active"
+            isNginxRunning -> "Local HTTPS Proxy Active"
+            else -> "Localhost Platform"
         }
-        val stopAllPendingIntent = PendingIntent.getService(
-            this,
-            1,
-            stopAllIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
 
-        val text = if (runningCount > 0) "$runningCount server(s) running" else "Localhost platform active"
+        val text = when {
+            runningCount > 0 && (isCfRunning || isNginxRunning) -> "$runningCount server(s) running • Tunnel active"
+            runningCount > 0 -> "$runningCount server(s) running"
+            isCfRunning -> "Tunnel active and routing traffic"
+            isNginxRunning -> "HTTPS proxy active on port 8443"
+            else -> "Localhost service standby"
+        }
 
         return NotificationCompat.Builder(this, LocalhostApplication.CHANNEL_ID)
-            .setContentTitle("Localhost Platform")
+            .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_app_logo)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop All", stopAllPendingIntent)
             .build()
     }
 
     companion object {
         const val NOTIFICATION_ID = 1001
-        const val ACTION_STOP_ALL = "com.localhost.app.STOP_ALL"
     }
 }

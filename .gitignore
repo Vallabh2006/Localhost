@@ -1,40 +1,48 @@
-# Built application and library binaries
 *.apk
-*.aar
-*.aab
+!Localhost.apk
 *.ap_
+*.aab
+*.aar
 *.dex
 *.class
-
-# Gradle build cache and outputs
-.gradle/
+*.hprof
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.war
+bin/
+gen/
+out/
 build/
 */build/
 */*/build/
+.gradle/
 .kotlin/
-
-# Local configuration and environment
+.externalNativeBuild/
+.cxx/
+captures/
 local.properties
+key.properties
+secrets.properties
+app-signing.properties
+google-services.json
+*.jks
+*.keystore
+*.p12
+*.key
+*.pem
+*.cert
 .env
-.tmp/
-tmp/
-
-# Android Studio / IntelliJ IDEA / VS Code
+.env.*
 .idea/
 *.iml
 *.iws
 *.ipr
-out/
 .navigation/
 .vscode/
-
-# Log and capture files
-*.log
-captures/
-.externalNativeBuild
-.cxx/
-
-# OS-specific files
+*.swp
+*.swo
+*~
+.#*
 .DS_Store
 .DS_Store?
 ._*
@@ -42,19 +50,27 @@ captures/
 .Trashes
 ehthumbs.db
 Thumbs.db
-
-# Signing keystores
-*.jks
-*.keystore
-
-# Python cache files
+desktop.ini
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+node_modules/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Node.js dependencies and logs
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage/
+htmlcov/
+vendor/
+composer.phar
+.phpunit.result.cache
+.tmp/
+tmp/
+temp/
+.cache/

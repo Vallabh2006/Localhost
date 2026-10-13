@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,11 +26,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -90,9 +95,10 @@ fun MonitorScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Server Monitor", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = TextPrimary)
+                    Text("Server Monitor", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface),
+                modifier = Modifier.height(48.dp)
             )
         }
     ) { padding ->
@@ -111,7 +117,11 @@ fun MonitorScreen(
                 }
 
                 item {
-                    NetworkDiagnosticsCard(diagnostics)
+                    ServerAnalysisCard(stats, projects.size)
+                }
+
+                item(span = { GridItemSpan(2) }) {
+                    NetworkDiagnosticsCard(diagnostics, stats)
                 }
 
                 item(span = { GridItemSpan(2) }) {
@@ -171,7 +181,11 @@ fun MonitorScreen(
                 }
 
                 item {
-                    NetworkDiagnosticsCard(diagnostics)
+                    ServerAnalysisCard(stats, projects.size)
+                }
+
+                item {
+                    NetworkDiagnosticsCard(diagnostics, stats)
                 }
 
                 item {
@@ -233,10 +247,24 @@ private fun SystemMetricsCard(stats: SystemMetrics) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Speed, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("System Telemetry", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Speed, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("System Telemetry", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(DarkSurfaceElevated)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text("${stats.cpuCores} CPU Cores", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -256,7 +284,7 @@ private fun SystemMetricsCard(stats: SystemMetrics) {
                 val usedMem = (stats.totalMemoryBytes - stats.availableMemoryBytes).coerceAtLeast(0L)
                 val memPct = if (stats.totalMemoryBytes > 0) (usedMem.toFloat() / stats.totalMemoryBytes.toFloat()) * 100f else 0f
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("App Memory", color = TextSecondary, fontSize = 12.sp)
+                    Text("Physical RAM", color = TextSecondary, fontSize = 12.sp)
                     Text("${formatBytes(usedMem)} / ${formatBytes(stats.totalMemoryBytes)} (${String.format(Locale.US, "%.0f%%", memPct)})", color = StatusGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 LinearProgressIndicator(
@@ -265,6 +293,12 @@ private fun SystemMetricsCard(stats: SystemMetrics) {
                     color = StatusGreen,
                     trackColor = DarkSurfaceElevated
                 )
+                if (stats.appHeapTotalBytes > 0) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("JVM Heap", color = TextMuted, fontSize = 11.sp)
+                        Text("${formatBytes(stats.appHeapUsedBytes)} / ${formatBytes(stats.appHeapTotalBytes)}", color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -281,12 +315,103 @@ private fun SystemMetricsCard(stats: SystemMetrics) {
                     trackColor = DarkSurfaceElevated
                 )
             }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.BatteryChargingFull, contentDescription = null, tint = if (stats.isCharging) StatusGreen else TextSecondary, modifier = Modifier.size(16.dp))
+                    Text("Battery: ${stats.batteryPercent}%${if (stats.isCharging) " (Charging)" else ""}", color = TextSecondary, fontSize = 12.sp)
+                }
+                Text("Uptime: ${formatUptime(stats.uptimeSeconds)}", color = TextMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ServerAnalysisCard(stats: SystemMetrics, projectsCount: Int) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Dns, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Server & Port Analysis", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                }
+
+                if (stats.runningProjectsCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(StatusGreen.copy(alpha = 0.15f))
+                            .border(1.dp, StatusGreen.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("${stats.runningProjectsCount} Active", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DarkSurfaceElevated)
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("Idle", color = TextMuted, fontSize = 11.sp)
+                    }
+                }
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Hosted Services", color = TextMuted, fontSize = 13.sp)
+                Text("${stats.runningProjectsCount} running of $projectsCount total", color = TextPrimary, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Listening Ports", color = TextMuted, fontSize = 13.sp)
+                if (stats.activePorts.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        stats.activePorts.forEach { port ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(PrimaryAccent.copy(alpha = 0.15f))
+                                    .border(1.dp, PrimaryAccent.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp)
+                            ) {
+                                Text(":$port", color = PrimaryAccent, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    Text("No active listeners", color = TextSecondary, fontSize = 12.sp)
+                }
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Socket Health", color = TextMuted, fontSize = 13.sp)
+                Text(if (stats.activePorts.size == stats.activePorts.toSet().size) "Clean sockets • No conflicts" else "Warning: Port collision detected", color = if (stats.activePorts.size == stats.activePorts.toSet().size) StatusGreen else StatusOrange, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
 
 @Composable
-private fun NetworkDiagnosticsCard(diagnostics: NetworkDiagnostics) {
+private fun NetworkDiagnosticsCard(diagnostics: NetworkDiagnostics, stats: SystemMetrics) {
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -342,6 +467,14 @@ private fun NetworkDiagnosticsCard(diagnostics: NetworkDiagnostics) {
                     Text("Interfaces", color = TextMuted, fontSize = 13.sp)
                     Text(diagnostics.activeInterfaces.take(3).joinToString(separator = ", "), fontFamily = FontFamily.Monospace, color = TextSecondary, fontSize = 12.sp)
                 }
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Default.SwapVert, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                    Text("Network Traffic", color = TextMuted, fontSize = 13.sp)
+                }
+                Text("Rx: ${formatBytes(stats.networkRxBytes)} • Tx: ${formatBytes(stats.networkTxBytes)}", fontFamily = FontFamily.Monospace, color = TextSecondary, fontSize = 12.sp)
             }
         }
     }
@@ -409,6 +542,13 @@ private fun ProjectMonitorCard(
             }
         }
     }
+}
+
+private fun formatUptime(seconds: Long): String {
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val secs = seconds % 60
+    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m ${secs}s"
 }
 
 private fun formatBytes(bytes: Long): String {

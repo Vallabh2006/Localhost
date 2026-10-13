@@ -18,11 +18,18 @@ data class ResourceMetrics(
 data class SystemMetrics(
     val timestamp: Long = System.currentTimeMillis(),
     val totalCpuPercent: Double = 0.0,
+    val cpuCores: Int = 1,
     val availableMemoryBytes: Long = 0L,
     val totalMemoryBytes: Long = 0L,
+    val appHeapUsedBytes: Long = 0L,
+    val appHeapTotalBytes: Long = 0L,
     val freeStorageBytes: Long = 0L,
     val totalStorageBytes: Long = 0L,
     val batteryPercent: Int = 100,
     val isCharging: Boolean = false,
-    val runningProjectsCount: Int = 0
+    val runningProjectsCount: Int = 0,
+    val activePorts: List<Int> = emptyList(),
+    val networkRxBytes: Long = 0L,
+    val networkTxBytes: Long = 0L,
+    val uptimeSeconds: Long = 0L
 )

@@ -586,7 +586,6 @@ kbd {
     color: var(--text-secondary);
 }
 
-/* Toast Container & Toasts */
 .toast-container {
     position: fixed;
     bottom: 2rem;

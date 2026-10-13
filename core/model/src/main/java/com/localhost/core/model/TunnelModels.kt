@@ -22,3 +22,21 @@ data class TunnelConfig(
     val errorMessage: String? = null,
     val hostnameMappings: Map<String, String> = emptyMap()
 )
+
+@Serializable
+data class SavedTunnelToken(
+    val id: String,
+    val name: String,
+    val token: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Serializable
+data class NginxProxyConfig(
+    val isRunning: Boolean = false,
+    val targetPort: Int = 8080,
+    val httpsPort: Int = 8443,
+    val localHttpsUrl: String = "",
+    val lanHttpsUrl: String = "",
+    val error: String? = null
+)

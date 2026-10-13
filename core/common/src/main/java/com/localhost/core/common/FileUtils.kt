@@ -41,7 +41,7 @@ object FileUtils {
                     depth--
                     if (depth < 0) return false
                 }
-                ".", "" -> { /* no-op */ }
+                ".", "" -> {}
                 else -> depth++
             }
         }

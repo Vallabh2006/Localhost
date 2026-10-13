@@ -1,25 +1,23 @@
-
 # Localhost
 
-Localhost transforms an Android device into a personal cloud and server hosting platform. Host web applications, REST APIs, microservices, and static sites written in Python (Flask), Node.js (Express), PHP, Static HTML/JS/CSS, and Java directly from your phone. Manage projects through the native Material 3 Android UI, an embedded Web Dashboard, or a built-in CLI terminal, and expose services to the public internet securely using Cloudflare Tunnel.
+Localhost is an all-in-one local development environment and server hosting platform for Android. It enables developers to scaffold, run, edit, manage, and tunnel web applications directly on Android devices with background persistence and real-time telemetry.
 
 ---
 
-## Key Features
+## Core Features
 
-- Multi-Language Runtimes: Run Python (Flask), Node.js (Express), PHP, Static websites, and Java directly on Android.
-- Pip Dependencies from Requirements: Validate and install dependencies from `requirements.txt` (or custom `.txt` files) with automatic file detection and error handling for invalid requirements files.
-- Live Server QR Code and Copyable Links: When servers are online, generate dynamic QR codes for instant mobile/desktop LAN scanning, alongside 1-tap clipboard copying for local LAN (`http://<IP>:<PORT>`) and loopback (`http://127.0.0.1:<PORT>`) URLs.
-- ZIP and Archive Import: Import pre-built projects from `.zip` or `.tar.gz` archives with automatic runtime detection (PHP, Node.js, Python, Java, Static) and port conflict resolution.
-- Scoped File Explorer and In-App Editor: Browse project directory trees, edit source code, preview assets, and extract archives in place.
-- Isolated Process Supervisor: Android Foreground Service with process tracking, crash loop protection, socket cleanup, and automatic engine fallback.
-- Cloudflare Tunnel Integration: Expose local servers over HTTPS using quick trycloudflare.com tunnels or custom domain named tunnels without router configuration or port forwarding.
-- Web Management Dashboard: Embedded Ktor CIO server delivering a real-time SPA dashboard accessible over Wi-Fi/LAN or public tunnels with file editing, log streaming, and package management.
-- In-App CLI Terminal: Interactive terminal shell with top input positioning, selectable/copyable output, bash navigation (`cd`, `ls`, `tree`, `cp`, `mv`, `rm`, `mkdir`, `touch`), runtime execution (`python`, `pip`, `node`, `npm`, `php`), and JSON output support.
-- Environment Variable Management: Manage key-value configurations, mask secrets, and bulk-import `.env` files with automatic injection into running processes.
-- Real-Time Logs and Monitoring: Selectable/copyable live stdout/stderr streams, log search, and live CPU/RAM/storage metrics.
-- Background Reliability: Partial wake locks, Wi-Fi locks, battery optimization exemption handling, and boot auto-start receiver.
-- Supabase Integration: Seamless connection and automatic injection of Supabase credentials into project environments.
+- Multi-Runtime Support: Native process execution for Python (Flask/FastAPI/pip), Node.js (Express/npm), PHP with Composer dependency management, Java OpenJDK 17 (.jar and source execution), and static HTML/CSS/JS web servers.
+- Project Controls: Instant Start, Stop, and Restart buttons on both dashboard process cards and project detail views.
+- Project Creation and Import: Template scaffolding, ZIP archive import and SAF export with dependency exclusion, and direct GitHub repository URL cloning (`https://github.com/user/repo`).
+- Scoped File Explorer: Breadcrumb address navigation with recent path suggestions, long-press context menu (Rename, Details, Download, Cut, Copy, Delete), new file and folder creation, centered GIF previews, and rendered Markdown viewer.
+- Real-Time Code Editor: Syntax color highlighting for Python, JavaScript, TypeScript, PHP, Java, HTML, CSS, JSON, and Shell scripts, paired with contextual token and variable auto-complete.
+- Local Nginx HTTPS Proxy: Embedded TLS reverse proxy with automatic self-signed certificate generation to access local servers securely over HTTPS (`https://localhost:8443` and `https://<LAN_IP>:8443`).
+- Cloudflare Named Tunnels: Cloudflared named tunnel integration with encrypted persistent token storage, token history dropdown selection, and instant activation.
+- In-App CLI Terminal: Interactive terminal shell featuring virtual accessory keyboard keys (`Tab`, `Ctrl+C`, `|`, `-`, `/`, `~`, `↑`, `↓`, `Clear`), forgiving flag and command parsing (`-ls a`, `curl`, `chmod`, `composer`, `pip`, `python`, `node`), command auto-suggestions, and styled prompt format.
+- Real-Time Server Telemetry: Accurate Linux `/proc` CPU utilization sampler with multi-core detection, physical RAM and JVM heap analysis, storage monitoring, battery and uptime tracking, listening socket health with collision checks, and live Rx/Tx network throughput.
+- Adaptive Supervisor Service: Single foreground notification active strictly when a server process is running or a tunnel is connected, automatically dismissed when all services are idle.
+- Modern Material 3 UI: Compact 48dp top bars, custom accent color themes (Cyan, Emerald, Purple, Amber, Crimson), and scalable responsive layouts for phones and tablets.
+- Security and Isolation: AES-256-GCM Keystore encryption for tunnel tokens and dashboard credentials, sandboxed process execution directories, and scoped filesystem operations.
 
 ---
 
@@ -32,73 +30,67 @@ Localhost transforms an Android device into a personal cloud and server hosting 
 - Android SDK Platform 35
 - Android device or emulator running Android 8.0+ (minSdk 26)
 
-## Usage
+### Building the Project
 
-### 1. Creating or Importing a Project
+```bash
+git clone https://github.com/localhost/localhost-android.git
+cd localhost-android
+./gradlew assembleDebug
+```
 
--  **From Template**: Open Localhost, tap `+`, enter a project name, choose a runtime (Python Flask, Node.js Express, PHP, Java, Static), and tap Create.
--  **From ZIP Archive**: Tap `Choose ZIP Archive` on the Create Project screen or the folder upload icon on the Projects list. Localhost extracts your archive, detects the runtime, and configures the start command.
-
-### 2. Installing Dependencies
-
-- Open the project detail view and navigate to the **Packages** tab.
--  **From Requirements File (.txt)**: Enter or select a `.txt` file (e.g., `requirements.txt`). Localhost validates file existence and structure before running `pip install -r <file>`. If the file is missing or invalid, an informative error is displayed.
--  **Single Package**: Enter a package name (e.g., `requests`, `fastapi`, `dotenv`) or select from popular libraries to install immediately.
-
-### 3. QR Code and Local Network Access
-
-- When a server is online (`RUNNING`), the **Overview** tab displays the generated **QR Code** and copyable links for both the LAN IP (`http://<LAN_IP>:<PORT>`) and Localhost (`http://127.0.0.1:<PORT>`).
-- Scan the QR code from any smartphone, tablet, or laptop on the same Wi-Fi network to open the site directly.
-
-### 4. In-App CLI Commands
-
-#### Navigation and File Operations
-
--  `pwd`: Print current working directory.
--  `cd <path>`: Change directory (e.g. `cd my-flask-app`, `cd ..`).
--  `ls [path]`: List files and subdirectories with sizes.
--  `tree [path]`: Display directory tree structure hierarchy.
--  `cat <file>`: Print file contents.
--  `mkdir <dir>`: Create new folder.
--  `touch <file>`: Create new file.
--  `cp <src> <dst>`: Copy file or folder.
--  `mv <src> <dst>`: Move or rename file or folder.
--  `rm [-r] <path>`: Delete file or directory.
--  `clear`: Clear terminal history.
-
-#### Runtime Execution
-
--  `python <script.py> [args]`: Run Python scripts directly.
--  `python3 -c "<code>"`: Run one-line Python code.
--  `pip <install|list|uninstall> [pkg]`: Run pip package manager.
--  `node <script.js>` / `npm <args>`: Run Node.js and npm.
--  `php <script.php>`: Run PHP scripts.
--  `exec <binary>`: Execute binaries in current directory.
-
-#### Project and Server Management
-
--  `list [--json]`: List all projects.
--  `start <name>`: Start a server.
--  `stop <name>`: Stop a server.
--  `restart <name>`: Restart a server.
--  `logs <name>`: View recent logs.
--  `create <name> <runtime> <port>`: Scaffold a new project.
--  `env [list]`: View project environment variables.
--  `env set <project> <KEY> <VALUE>`: Set environment variable.
--  `tunnel <start|stop|status>`: Manage Cloudflare tunnel.
--  `status`: Show platform status.
+The compiled APK will be located at:
+`app/build/outputs/apk/full/debug/app-full-debug.apk`
 
 ---
 
-## Security
+## Usage Guide
 
-- Sensitive credentials (Cloudflare tokens, Supabase keys, dashboard passwords) are encrypted with AES-256-GCM backed by Android Keystore.
-- Process execution is isolated to project working directories with sanitized environment variables.
-- The web management dashboard requires authentication and binds locally by default.
+### 1. Creating and Importing Projects
 
+- From Template: Tap `+` on the Projects screen, enter a project name, select a runtime (Python, Node.js, PHP, Java, Static), specify the entry file and port, and tap Create.
+- From GitHub: Tap the download icon in the top bar, enter any public repository URL (`https://github.com/owner/repo`), and Localhost clones and configures the workspace automatically.
+- From ZIP Archive: Tap the folder import icon to load an archive from Android storage. Localhost extracts the files, autodetects the project runtime, and sets up startup commands.
 
+### 2. Dependency Management
 
-## Architecture and Module Structure
+- Python: Use the Packages tab to install packages individually or install via `requirements.txt`.
+- PHP: Download and run `composer.phar` directly through the PHP package manager or via the in-app terminal (`composer install`, `composer require <pkg>`).
+- Node.js: Run `npm install` directly within project directories using the CLI terminal.
+
+### 3. Tunnels and HTTPS Access
+
+- Local HTTPS Proxy: Open the Tunnel screen, select your target project, and tap Start HTTPS Proxy. Access your project securely at `https://localhost:8443` or from other devices on your local network.
+- Cloudflare Named Tunnel: Enter your Cloudflare Tunnel token. Localhost securely saves the token in your encrypted history list for quick one-tap reuse.
+
+### 4. In-App CLI Terminal
+
+#### Common Commands
+
+- `pwd`: Print working directory.
+- `cd <path>`: Change directory.
+- `ls [-la] [path]`: List directory contents with forgiving flag support (e.g. `-ls a`).
+- `tree [path]`: View directory hierarchy tree.
+- `cat <file>`: Print file contents.
+- `mkdir <dir>`: Create directory.
+- `touch <file>`: Create file.
+- `cp <src> <dst>`: Copy file or folder.
+- `mv <src> <dst>`: Move or rename file or folder.
+- `rm [-r] <path>`: Delete file or directory.
+- `curl <url>`: Send HTTP GET request and display response.
+- `chmod <perms> <file>`: Update file permissions.
+- `composer <args>`: Execute PHP Composer.
+- `python <script.py>` / `pip <args>`: Execute Python and pip.
+- `node <script.js>` / `npm <args>`: Execute Node.js and npm.
+- `php <script.php>`: Execute PHP scripts.
+- `list`: List all configured projects.
+- `start <name>` / `stop <name>` / `restart <name>`: Manage server lifecycles.
+- `logs <name>`: Display recent stdout and stderr logs.
+- `status`: Show platform and service status.
+- `clear`: Clear console output.
+
+---
+
+## Architecture and Modules
 
 ```
 Localhost/
@@ -113,100 +105,80 @@ Localhost/
 │   │   ├── Network Utilities
 │   │   ├── QR Code Generator
 │   │   └── Archive Extraction
-│   │
 │   ├── data/
 │   │   ├── Room Database
 │   │   ├── DataStore Preferences
 │   │   └── Repositories
-│   │
 │   ├── model/
 │   │   ├── Project
 │   │   ├── RuntimeType
 │   │   ├── LogEntry
-│   │   ├── Metrics
-│   │   ├── Tunnel
+│   │   ├── ResourceMetrics
+│   │   ├── TunnelModels
 │   │   └── RuntimePack
-│   │
 │   ├── security/
 │   │   ├── Keystore-backed SecretStore
 │   │   └── Password Hashing
-│   │
-│   ├── designsystem/
-│   │   ├── Material 3 Theme
-│   │   ├── Components
-│   │   └── Color Tokens
-│   │
-│   └── runtime/
-│       ├── manager/
-│       │   ├── Runtime Pack Discovery
-│       │   ├── Runtime Downloads
-│       │   ├── Pause/Resume
-│       │   ├── Archive Extraction
-│       │   └── Execution Environment
-│       │
-│       ├── process/
-│       │   ├── Process Supervisor
-│       │   ├── ManagedProcess Lifecycle
-│       │   └── /proc Metrics Sampler
-│       │
-│       ├── templates/
-│       │   ├── Flask
-│       │   ├── Express
-│       │   ├── PHP
-│       │   ├── Static
-│       │   └── Java
-│       │
-│       ├── tunnel/
-│       │   ├── Cloudflared Binary Manager
-│       │   ├── Quick Tunnel
-│       │   └── Named Tunnel
-│       │
-│       ├── server-dashboard/
-│       │   ├── Ktor CIO Server
-│       │   ├── REST API
-│       │   ├── WebSockets
-│       │   └── SPA Static Asset Server
-│       │
-│       └── cli/
-│           ├── CLI Command Parser
-│           └── Terminal Shell Engine
+│   └── designsystem/
+│       ├── Material 3 Theme
+│       ├── Components
+│       └── Color Tokens
+│
+├── runtime/
+│   ├── manager/
+│   │   ├── Runtime Pack Discovery
+│   │   ├── Runtime Downloads
+│   │   ├── ComposerManager
+│   │   └── Execution Environment
+│   ├── process/
+│   │   ├── Process Supervisor
+│   │   ├── ManagedProcess Lifecycle
+│   │   └── ProcessMetricsSampler
+│   └── templates/
+│       ├── Flask
+│       ├── Express
+│       ├── PHP
+│       ├── Java
+│       └── Static
+│
+├── tunnel/
+│   ├── CloudflareTunnelManager
+│   ├── NginxManager
+│   └── SelfSignedCertHelper
+│
+├── server-dashboard/
+│   ├── Ktor CIO Server
+│   ├── REST API
+│   ├── WebSockets
+│   └── SPA Static Asset Server
+│
+├── cli/
+│   ├── LocalhostCli
+│   └── TerminalScreen
 │
 └── feature/
     ├── projects/
-    │   ├── Project List
-    │   ├── Creation Wizard
-    │   ├── Project Details
-    │   ├── Environment Variable Manager
-    │   └── ZIP Import
-    │
+    │   ├── ProjectListScreen
+    │   ├── ProjectDetailScreen
+    │   └── ProjectsViewModel
     ├── logs/
-    │   ├── Live Log Streaming
-    │   ├── Text Selection
-    │   ├── Copy to Clipboard
-    │   └── Log Search
-    │
+    │   ├── LogViewerScreen
+    │   └── LogsViewModel
     ├── files/
-    │   ├── File Explorer
-    │   ├── Code Editor
-    │   └── Archive Extractor
-    │
+    │   ├── FileExplorerScreen
+    │   ├── SyntaxHighlighter
+    │   └── FilesViewModel
     ├── monitor/
-    │   ├── Hardware Resource Gauges
-    │   ├── Network Diagnostics
-    │   └── Process Control
-    │
+    │   ├── MonitorScreen
+    │   └── MonitorViewModel
     ├── tunnel/
-    │   └── Cloudflare Tunnel Management UI
-    │
-    ├── settings/
-    │   ├── Runtime Manager
-    │   ├── Pause/Resume
-    │   ├── Battery Optimization
-    │   └── Preferences
-    │
-    └── supabase/
-        └── Supabase Connection & Key Manager
+    │   ├── TunnelScreen
+    │   └── TunnelViewModel
+    └── settings/
+        ├── SettingsScreen
+        └── SettingsViewModel
 ```
+
 ---
 
 ## License

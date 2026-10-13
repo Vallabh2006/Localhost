@@ -1,5 +1,9 @@
 package com.localhost.core.data.repository
 
+import com.localhost.core.model.SavedTunnelToken
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -7,7 +11,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.localhost.core.model.DashboardConfig
-import com.localhost.core.model.SupabaseConfig
 import com.localhost.core.model.TunnelConfig
 import com.localhost.core.security.PasswordHasher
 import com.localhost.core.security.SecretStore
@@ -34,10 +37,10 @@ class SettingsRepository @Inject constructor(
         val DASHBOARD_ENABLED = booleanPreferencesKey("dashboard_enabled")
         val DASHBOARD_LAN_ONLY = booleanPreferencesKey("dashboard_lan_only")
         val DASHBOARD_USERNAME = stringPreferencesKey("dashboard_username")
-        val SUPABASE_URL = stringPreferencesKey("supabase_url")
         val TUNNEL_NAME = stringPreferencesKey("tunnel_name")
         val TUNNEL_IS_QUICK = booleanPreferencesKey("tunnel_is_quick")
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
+        val SAVED_TUNNEL_TOKENS = stringPreferencesKey("saved_tunnel_tokens")
     }
 
     val wakeLockEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.WAKE_LOCK_ENABLED] ?: true }
@@ -94,30 +97,6 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    fun getSupabaseConfig(): Flow<SupabaseConfig> = context.dataStore.data.map { prefs ->
-        val url = prefs[Keys.SUPABASE_URL] ?: ""
-        val anonKey = secretStore.getSecret("supabase_anon_key") ?: ""
-        val serviceKey = secretStore.getSecret("supabase_service_key") ?: ""
-        SupabaseConfig(
-            projectUrl = url,
-            anonKey = anonKey,
-            serviceKey = serviceKey,
-            isConnected = url.isNotBlank() && anonKey.isNotBlank()
-        )
-    }
-
-    suspend fun saveSupabaseConfig(config: SupabaseConfig) {
-        context.dataStore.edit { prefs ->
-            prefs[Keys.SUPABASE_URL] = config.projectUrl
-        }
-        if (config.anonKey.isNotBlank()) {
-            secretStore.putSecret("supabase_anon_key", config.anonKey)
-        }
-        if (config.serviceKey.isNotBlank()) {
-            secretStore.putSecret("supabase_service_key", config.serviceKey)
-        }
-    }
-
     fun getTunnelConfig(): Flow<TunnelConfig> = context.dataStore.data.map { prefs ->
         val tunnelName = prefs[Keys.TUNNEL_NAME] ?: "localhost-phone"
         val isQuick = prefs[Keys.TUNNEL_IS_QUICK] ?: true
@@ -148,4 +127,44 @@ class SettingsRepository @Inject constructor(
             secretStore.putSecret("cloudflare_tunnel_id", config.tunnelId)
         }
     }
+
+    fun getSavedTunnelTokens(): Flow<List<SavedTunnelToken>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[Keys.SAVED_TUNNEL_TOKENS] ?: "[]"
+        try {
+            Json.decodeFromString<List<SavedTunnelToken>>(raw)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun saveTunnelToken(token: SavedTunnelToken) {
+        context.dataStore.edit { prefs ->
+            val raw = prefs[Keys.SAVED_TUNNEL_TOKENS] ?: "[]"
+            val current = try {
+                Json.decodeFromString<List<SavedTunnelToken>>(raw).toMutableList()
+            } catch (_: Exception) {
+                mutableListOf()
+            }
+            val existingIdx = current.indexOfFirst { it.id == token.id || it.token == token.token }
+            if (existingIdx >= 0) {
+                current[existingIdx] = token
+            } else {
+                current.add(0, token)
+            }
+            prefs[Keys.SAVED_TUNNEL_TOKENS] = Json.encodeToString<List<SavedTunnelToken>>(current)
+        }
+    }
+
+    suspend fun deleteTunnelToken(tokenId: String) {
+        context.dataStore.edit { prefs ->
+            val raw = prefs[Keys.SAVED_TUNNEL_TOKENS] ?: "[]"
+            val current = try {
+                Json.decodeFromString<List<SavedTunnelToken>>(raw).filter { it.id != tokenId }
+            } catch (_: Exception) {
+                emptyList()
+            }
+            prefs[Keys.SAVED_TUNNEL_TOKENS] = Json.encodeToString<List<SavedTunnelToken>>(current)
+        }
+    }
+
 }

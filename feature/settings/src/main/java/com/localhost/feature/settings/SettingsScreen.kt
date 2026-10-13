@@ -1,5 +1,8 @@
 package com.localhost.feature.settings
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -62,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -125,14 +130,15 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Settings", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = TextPrimary)
+                    Text("Settings", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 },
                 actions = {
-                    IconButton(onClick = { showHelpDialog = true }) {
+                    IconButton(onClick = { showHelpDialog = true }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Help Guide", tint = PrimaryAccent)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface),
+                modifier = Modifier.height(48.dp)
             )
         }
     ) { padding ->
@@ -188,7 +194,9 @@ fun SettingsScreen(
                         viewModel = viewModel
                     )
 
-                    AboutSection()
+                    AppearanceSection()
+
+                AboutSection()
                 }
             }
         } else {
@@ -231,6 +239,8 @@ fun SettingsScreen(
                     viewModel = viewModel
                 )
 
+                AppearanceSection()
+
                 AboutSection()
 
                 Spacer(modifier = Modifier.height(72.dp))
@@ -246,27 +256,56 @@ fun SettingsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = null, tint = PrimaryAccent)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Localhost Documentation", fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Localhost Documentation & Help", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
                 }
             },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Terminal & Shell Basics", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
-                    HelpCmdItem("help", "Display built-in commands list")
-                    HelpCmdItem("ls / pwd / cd", "Navigate filesystem relative to /app root")
-                    HelpCmdItem("python3 / node", "Execute scripts directly via installed runtimes")
-                    HelpCmdItem("pip install <pkg>", "Install Python libraries into user site-packages")
-                    HelpCmdItem("npm install <pkg>", "Install Node.js packages into project directory")
-                    HelpCmdItem("curl <url>", "Make HTTP requests directly from phone shell")
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text("Bash & Terminal Commands", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
+                    HelpCmdItem("ls [-la / -lh / -ls a]", "List files with details, hidden files, or human-readable sizes")
+                    HelpCmdItem("cd <path> / cd - / cd ~", "Navigate directories relative to app root")
+                    HelpCmdItem("cat [-n] <file>", "Output file content with optional line numbers")
+                    HelpCmdItem("head [-n] / tail [-n]", "Output first or last lines of a file")
+                    HelpCmdItem("mkdir [-p] / touch <file>", "Create folders recursively or touch files")
+                    HelpCmdItem("rm [-rf] / cp [-r] / mv", "Remove, copy, or move files and directories")
+                    HelpCmdItem("grep [-i / -r / -n] <kw>", "Search text patterns in files")
+                    HelpCmdItem("find [-name <pat>]", "Find files by name or pattern")
+                    HelpCmdItem("curl [-o <file>] <url>", "Fetch HTTP content or download files")
+                    HelpCmdItem("chmod [+x / 755] <file>", "Modify file read/write/execute permissions")
+                    HelpCmdItem("start / stop / restart <id>", "Manage background project daemons")
+                    HelpCmdItem("composer <cmd>", "Run PHP Composer package manager commands")
+                    HelpCmdItem("python3 / node / php / java", "Execute runtime scripts directly")
 
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Networking & Tunnels", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
-                    Text("- Cloudflare Tunnels: Create public URLs for your local port without opening router ports.", color = TextSecondary, fontSize = 12.sp)
-                    Text("- VPN Mode: Enable or disable VPN tunnel routing compatibility.", color = TextSecondary, fontSize = 12.sp)
+                    Text("Local Nginx & HTTPS Tunnels", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
+                    Text("- Local Nginx HTTPS Proxy: Forwards local project ports to local port 8443 over SSL/TLS with auto-generated certificates.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Cloudflare Named Tunnels: Use saved named tunnel tokens to temporarily expose your site to the public with HTTPS until stopped.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Saved Tokens: Save and switch between your production and staging tunnel tokens with a single tap.", color = TextSecondary, fontSize = 12.sp)
 
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Background Survival", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
-                    Text("- Enable CPU Wake Lock and Battery Optimization Exemption so Android does not kill long-running web servers when the screen turns off.", color = TextSecondary, fontSize = 12.sp)
+                    Text("Languages & Package Management", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
+                    Text("- PHP + Composer: Download composer.phar directly in app to manage PHP dependencies (composer require / install).", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Python: Isolated .venv environments with pip package installer.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Java: OpenJDK 17 execution of standard JAR files and Java source.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Node.js: Full NPM package management inside project directories.", color = TextSecondary, fontSize = 12.sp)
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Projects & File Explorer", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
+                    Text("- GitHub Import: Paste any GitHub repo URL (e.g. github.com/user/repo) to download and auto-configure a project.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- File Context Actions: Long-press any file row to Rename, View File Details, Download, Cut, Copy, or Delete.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Address Bar: Tap any breadcrumb chip to jump to parent folders, or edit path to see recent project folders.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Code Editor: Syntax highlighting for Python, JS, PHP, Java, HTML, CSS + auto-complete suggestions for identifiers.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- Markdown Preview: Toggle Preview mode in .md files to read rendered GitHub-style documentation.", color = TextSecondary, fontSize = 12.sp)
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Background Execution", fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 14.sp)
+                    Text("- Battery Optimization: Request exemption so Android system does not kill servers when screen is locked.", color = TextSecondary, fontSize = 12.sp)
+                    Text("- CPU Wake Lock: Keeps the device CPU running for persistent background web servers.", color = TextSecondary, fontSize = 12.sp)
                 }
             },
             confirmButton = {
@@ -592,6 +631,70 @@ private fun RuntimePackItem(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(pack.statusMessage ?: "", color = TextMuted, fontSize = 11.sp)
                 }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun AppearanceSection() {
+    var selectedAccent by remember { mutableStateOf("Emerald") }
+    var isCompactMode by remember { mutableStateOf(false) }
+
+    val accents = listOf(
+        Pair("Emerald", Color(0xFF10B981)),
+        Pair("Cyan", Color(0xFF06B6D4)),
+        Pair("Indigo", Color(0xFF6366F1)),
+        Pair("Amber", Color(0xFFF59E0B)),
+        Pair("Rose", Color(0xFFF43F5E))
+    )
+
+    Text("Appearance & UI Accents", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.dp, DarkBorder)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("Accent Color Palette", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                accents.forEach { (name, color) ->
+                    val isSelected = selectedAccent == name
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .border(
+                                width = if (isSelected) 3.dp else 1.dp,
+                                color = if (isSelected) androidx.compose.ui.graphics.Color.White else DarkBorder,
+                                shape = CircleShape
+                            )
+                            .clickable { selectedAccent = name },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Compact UI Mode", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
+                    Text("Tighter padding and minimal card spacing across views", fontSize = 11.sp, color = TextSecondary)
+                }
+                Switch(
+                    checked = isCompactMode,
+                    onCheckedChange = { isCompactMode = it }
+                )
             }
         }
     }
