@@ -145,7 +145,7 @@ fun LogsScreen(
 
     var dropdownExpanded by remember { mutableStateOf(false) }
     val currentProject = projects.firstOrNull { it.id == selectedId }
-    val timeFormatter = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+    val timeFormatter = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
 
     fun copyTextToClipboard(label: String, text: String, count: Int = 1) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -424,7 +424,7 @@ private fun LogItemRow(
     onLongClick: () -> Unit,
     onCopyLine: (String) -> Unit
 ) {
-    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
+    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
     val timeStr = remember(log.timestamp) { timeFormatter.format(Date(log.timestamp)) }
 
     val textColor = when (log.stream) {

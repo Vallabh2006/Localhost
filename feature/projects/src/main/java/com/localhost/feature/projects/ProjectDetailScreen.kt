@@ -3001,7 +3001,7 @@ private fun ProjectLiveLogsView(
     var streamFilter by remember { mutableStateOf<com.localhost.core.model.LogStream?>(null) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
-    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
+    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
     val filteredLogs = remember(logs, searchQuery, streamFilter) {
         logs.filter { entry ->

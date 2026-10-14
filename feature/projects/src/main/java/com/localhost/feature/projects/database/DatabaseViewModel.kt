@@ -104,7 +104,7 @@ class DatabaseViewModel @Inject constructor(
         get() = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
 
     fun addLog(msg: String) {
-        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
         _databaseLogs.value = (_databaseLogs.value + "[$timestamp] $msg").takeLast(500)
     }
 
