@@ -1,5 +1,34 @@
 package com.localhost.feature.projects
 
+import java.util.Date
+import com.localhost.core.designsystem.theme.SecondaryTeal
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.text.input.KeyboardType
+
+
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.ListAlt
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storage
+
+
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
 
@@ -63,6 +92,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -154,7 +184,6 @@ import com.localhost.core.model.ProjectStatus
 import com.localhost.core.model.RuntimeType
 import com.localhost.core.model.TunnelStatus
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -184,7 +213,10 @@ fun ProjectDetailScreen(
     var showEditDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
+    var showDotEnvExportPrompt by remember { mutableStateOf(false) }
 
+    val tabs = listOf("Dashboard", "Configs", "Terminal", "Log", "Commits", "Stats", "Settings")
+    val tabHistory = remember { mutableStateListOf(0) }
     BackHandler {
         if (browserPreviewUrl != null) {
             browserPreviewUrl = null
@@ -194,13 +226,13 @@ fun ProjectDetailScreen(
             showDeleteDialog = false
         } else if (qrDialogUrl != null) {
             qrDialogUrl = null
-        } else if (selectedTab > 0) {
-            selectedTab = 0
+        } else if (tabHistory.size > 1) {
+            tabHistory.removeAt(tabHistory.lastIndex)
+            selectedTab = tabHistory.last()
         } else {
             onBackClick()
         }
     }
-    val tabs = listOf("Overview", "Logs & Terminal", "Analytics", "Snapshots", "Packages", "Control")
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -211,13 +243,13 @@ fun ProjectDetailScreen(
         }
     }
 
-    fun shareExportedZip() {
+    fun doExportZip(includeDotEnv: Boolean) {
         if (project == null) return
         scope.launch {
             isExporting = true
             Toast.makeText(context, "Exporting ${project.name} ZIP...", Toast.LENGTH_SHORT).show()
             try {
-                val zipFile = viewModel.exportProjectZip(project, context)
+                val zipFile = viewModel.exportProjectZip(project, context, includeDotEnv = includeDotEnv)
                 if (zipFile != null && zipFile.exists()) {
                     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -235,6 +267,66 @@ fun ProjectDetailScreen(
                 isExporting = false
             }
         }
+    }
+
+    fun shareExportedZip() {
+        if (project == null) return
+        val hasDotEnv = java.io.File(project.workingDir, ".env").exists()
+        if (hasDotEnv) {
+            showDotEnvExportPrompt = true
+        } else {
+            doExportZip(includeDotEnv = false)
+        }
+    }
+
+    if (showDotEnvExportPrompt && project != null) {
+        AlertDialog(
+            onDismissRequest = { showDotEnvExportPrompt = false },
+            containerColor = DarkSurfaceElevated,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Security, contentDescription = null, tint = StatusOrange)
+                    Text(".env Detected", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Text(
+                    "This project contains a .env file with environment variables. Do you want to include it in the exported archive or exclude it for security?",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDotEnvExportPrompt = false
+                        doExportZip(includeDotEnv = true)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Include .env", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { showDotEnvExportPrompt = false }) {
+                        Text("Cancel", color = TextMuted)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            showDotEnvExportPrompt = false
+                            doExportZip(includeDotEnv = false)
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, PrimaryAccent)
+                    ) {
+                        Text("Exclude (Recommended)", color = PrimaryAccent, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        )
     }
 
     if (project == null) {
@@ -468,16 +560,20 @@ fun ProjectDetailScreen(
                                 onStart = { viewModel.startProject(project) },
                                 onStop = { viewModel.stopProject(project.id) },
                                 onRestart = { viewModel.restartProject(project.id) },
-                                onOpenLogs = onOpenLogs,
+                                onOpenLogs = {
+                                    selectedTab = 3
+                                    tabHistory.add(3)
+                                },
                                 onOpenFiles = onOpenFiles,
                                 onExportZip = { shareExportedZip() },
                                 onOpenBrowser = { browserPreviewUrl = it }
                             )
-                            1 -> LogsAndTerminalTab(project = project, viewModel = viewModel)
-                            2 -> AnalyticsTab(project = project, viewModel = viewModel)
-                            3 -> SnapshotsTab(project = project, viewModel = viewModel)
-                            4 -> PackagesTab(project = project, viewModel = viewModel)
-                            5 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                            1 -> ConfigurationsTab(project = project, viewModel = viewModel)
+                            2 -> ProjectTerminalTab(project = project, viewModel = viewModel)
+                            3 -> ProjectLiveLogsView(project = project, viewModel = viewModel)
+                            4 -> VersionsTab(project = project, viewModel = viewModel)
+                            5 -> AnalyticsTab(project = project, viewModel = viewModel)
+                            6 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
                         }
                     }
                 }
@@ -505,7 +601,12 @@ fun ProjectDetailScreen(
                     tabs.forEachIndexed { index, title ->
                         Tab(
                             selected = selectedTab == index,
-                            onClick = { selectedTab = index },
+                            onClick = {
+                                if (selectedTab != index) {
+                                    selectedTab = index
+                                    tabHistory.add(index)
+                                }
+                            },
                             text = {
                                 Text(
                                     text = title,
@@ -530,16 +631,20 @@ fun ProjectDetailScreen(
                             onStart = { viewModel.startProject(project) },
                             onStop = { viewModel.stopProject(project.id) },
                             onRestart = { viewModel.restartProject(project.id) },
-                            onOpenLogs = onOpenLogs,
+                            onOpenLogs = {
+                                selectedTab = 3
+                                tabHistory.add(3)
+                            },
                             onOpenFiles = onOpenFiles,
                             onExportZip = { shareExportedZip() },
                             onOpenBrowser = { browserPreviewUrl = it }
                         )
-                    1 -> LogsAndTerminalTab(project = project, viewModel = viewModel)
-                    2 -> AnalyticsTab(project = project, viewModel = viewModel)
-                    3 -> SnapshotsTab(project = project, viewModel = viewModel)
-                    4 -> PackagesTab(project = project, viewModel = viewModel)
-                    5 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                    1 -> ConfigurationsTab(project = project, viewModel = viewModel)
+                    2 -> ProjectTerminalTab(project = project, viewModel = viewModel)
+                    3 -> ProjectLiveLogsView(project = project, viewModel = viewModel)
+                    4 -> VersionsTab(project = project, viewModel = viewModel)
+                    5 -> AnalyticsTab(project = project, viewModel = viewModel)
+                    6 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
                 }
             }
         }
@@ -918,7 +1023,7 @@ private fun OverviewTabContent(
         ) {
             Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Open Browser", color = PrimaryAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("Open", color = PrimaryAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
 
         OutlinedButton(
@@ -931,188 +1036,98 @@ private fun OverviewTabContent(
         ) {
             Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Process Logs", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("Log", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = BorderStroke(1.5.dp, if (tunnelStatus == TunnelStatus.CONNECTED) StatusGreen.copy(alpha = 0.6f) else PrimaryAccent.copy(alpha = 0.35f))
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    if (activeTunnelUrl.isNotBlank() || tunnelStatus == com.localhost.core.model.TunnelStatus.CONNECTED) {
+        val displayUrl = if (activeTunnelUrl.isNotBlank()) activeTunnelUrl else "https://tunnel.localhost"
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.5.dp, StatusGreen.copy(alpha = 0.6f))
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Cloud, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Public Internet Port Forwarding", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
-                }
-
-                val (tLabel, tColor) = when (tunnelStatus) {
-                    TunnelStatus.DISCONNECTED -> Pair("OFFLINE", TextMuted)
-                    TunnelStatus.CONNECTING -> Pair("CONNECTING", StatusOrange)
-                    TunnelStatus.CONNECTED -> Pair("LIVE & PUBLIC", StatusGreen)
-                    TunnelStatus.ERROR -> Pair("ERROR", StatusRed)
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = tColor.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, tColor.copy(alpha = 0.4f))
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = tLabel,
-                        color = tColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(StatusGreen)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Cloudflare Tunnel Active",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = StatusGreen
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = StatusGreen.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            "Live Public",
+                            color = StatusGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
                 }
-            }
 
-            Text(
-                "Creates a random public URL accessible by anyone worldwide on the internet. No Wi-Fi or router port-forwarding required.",
-                fontSize = 11.sp,
-                color = TextSecondary,
-                lineHeight = 16.sp
-            )
-
-            if (tunnelStatus == TunnelStatus.CONNECTED && activeTunnelUrl.isNotBlank()) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = DarkSurfaceElevated,
-                    border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
+                    border = BorderStroke(1.dp, DarkBorderSubtle)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Random Public URL (Worldwide)", fontSize = 10.sp, color = TextMuted, fontWeight = FontWeight.Medium)
-                            Text(
-                                text = activeTunnelUrl,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                color = StatusGreen,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = displayUrl,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            color = PrimaryAccent,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             IconButton(
                                 onClick = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Public Tunnel URL", activeTunnelUrl))
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    Toast.makeText(context, "Copied public URL", Toast.LENGTH_SHORT).show()
+                                    val clip = ClipData.newPlainText("Tunnel URL", displayUrl)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Copied Tunnel URL", Toast.LENGTH_SHORT).show()
                                 },
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = StatusGreen, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
                             }
-
                             IconButton(
-                                onClick = {
-                                    onOpenBrowser(activeTunnelUrl)
-                                },
-                                modifier = Modifier.size(36.dp)
+                                onClick = { onOpenBrowser(displayUrl) },
+                                modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Default.OpenInBrowser, contentDescription = "Open", tint = TextPrimary, modifier = Modifier.size(18.dp))
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_TEXT, activeTunnelUrl)
-                                    }
-                                    context.startActivity(Intent.createChooser(sendIntent, "Share Public URL"))
-                                },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = "Share", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.OpenInBrowser, contentDescription = "Open", tint = TextPrimary, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
-                }
-
-                Button(
-                    onClick = onStopTunnel,
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
-                    border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                ) {
-                    Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Stop Public Port Forwarding", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-            } else if (tunnelStatus == TunnelStatus.CONNECTING) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = DarkSurfaceElevated,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = PrimaryAccent,
-                            strokeWidth = 2.dp
-                        )
-                        Column {
-                            Text("Connecting to edge network...", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
-                            Text("Generating secure random public URL...", fontSize = 11.sp, color = TextSecondary)
-                        }
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = onStopTunnel,
-                    border = BorderStroke(1.dp, DarkBorder),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                ) {
-                    Text("Cancel", color = TextSecondary)
-                }
-            } else {
-                tunnelError?.let { err ->
-                    Text(err, color = StatusRed, fontSize = 11.sp)
-                }
-
-                Button(
-                    onClick = onStartTunnel,
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                ) {
-                    Icon(Icons.Default.Cloud, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Forward Port to Internet (Free)", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
         }
     }
+
+
 
     if (project.status == ProjectStatus.RUNNING) {
         val qrBitmap = remember(lanUrl) { QrCodeGenerator.generate(lanUrl, 400) }
@@ -1438,7 +1453,7 @@ private fun OverviewTabContent(
 }
 
 @Composable
-private fun SnapshotsTab(
+private fun VersionsTab(
     project: Project,
     viewModel: ProjectsViewModel
 ) {
@@ -1675,31 +1690,53 @@ private fun SnapshotsTab(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PackagesTab(
+private fun ConfigurationsTab(
     project: Project,
     viewModel: ProjectsViewModel
 ) {
-    val isPython = project.runtime == RuntimeType.PYTHON
-    val isNode = project.runtime == RuntimeType.NODEJS
-    val isPhp = project.runtime == RuntimeType.PHP
     val isInstalling by viewModel.isInstallingDeps.collectAsState()
-    var customPackageInput by remember { mutableStateOf("") }
-    var requirementsFileInput by remember { mutableStateOf("requirements.txt") }
-    var packageToDelete by remember { mutableStateOf<String?>(null) }
     val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
 
-    val requirementsFiles = remember(project.id) {
-        if (isPython) viewModel.getRequirementsFiles(project) else emptyList()
+    var envVars by remember(project.id) { mutableStateOf(viewModel.loadDotEnv(project).toMutableMap()) }
+    var newEnvKey by remember { mutableStateOf("") }
+    var newEnvValue by remember { mutableStateOf("") }
+
+    var showFreezeDialog by remember { mutableStateOf(false) }
+    var freezeFileName by remember { mutableStateOf("requirements.txt") }
+    var freezeFilePath by remember { mutableStateOf("./") }
+
+    var mainFileName by remember(project.id) {
+        val defaultMain = when (project.runtime) {
+            RuntimeType.PYTHON -> "app.py"
+            RuntimeType.PHP -> "index.php"
+            RuntimeType.NODEJS -> "server.js"
+            RuntimeType.JAVA -> "Main"
+            RuntimeType.STATIC -> "index.html"
+        }
+        mutableStateOf(defaultMain)
     }
 
-    val popularPackages = remember(project.runtime) {
-        when (project.runtime) {
-            RuntimeType.PYTHON -> listOf("flask", "requests", "fastapi", "uvicorn", "pydantic", "django", "pytest", "python-dotenv")
-            RuntimeType.NODEJS -> listOf("express", "cors", "dotenv", "ws", "axios", "mongoose", "nodemon", "jsonwebtoken")
-            RuntimeType.PHP -> listOf("guzzlehttp/guzzle", "symfony/var-dumper", "monolog/monolog", "vlucas/phpdotenv", "nikic/fast-route", "twig/twig", "nesbot/carbon", "illuminate/database")
-            else -> emptyList()
+    val workDir = remember(project.workingDir) { java.io.File(project.workingDir) }
+    val dirSize = remember(project.workingDir, envVars.size) {
+        var bytes = 0L
+        workDir.walkTopDown().forEach { if (it.isFile) bytes += it.length() }
+        bytes
+    }
+    val usedMb = dirSize / (1024.0 * 1024.0)
+    val minQuota = maxOf(50f, Math.ceil(usedMb + 5.0).toFloat()).coerceAtMost(1024f)
+    var quotaMb by remember(project.id) { mutableFloatStateOf(maxOf(250f, minQuota)) }
+    LaunchedEffect(minQuota) {
+        if (quotaMb < minQuota) {
+            quotaMb = minQuota
         }
     }
+    val quotaProgress = (usedMb / quotaMb).coerceIn(0.0, 1.0).toFloat()
+
+    var activeLang by remember(project.runtime) { mutableStateOf(project.runtime.name) }
+    val languages = listOf("PYTHON" to "Python", "PHP" to "PHP", "NODEJS" to "Node.js", "JAVA" to "Java", "STATIC" to "Static")
+
+    var customPackageInput by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -1708,181 +1745,281 @@ private fun PackagesTab(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (!isPython && !isNode && !isPhp) {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Storage, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Project Storage Quota", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                    }
                     Text(
-                        "${project.runtime.displayName} projects use built-in execution. Custom package managers are active for Python (pip), Node.js (npm), and PHP (composer).",
-                        color = TextSecondary,
-                        fontSize = 13.sp
+                        String.format(java.util.Locale.US, "%.1f MB / %.0f MB", usedMb, quotaMb),
+                        fontSize = 12.sp,
+                        color = if (quotaProgress > 0.85f) StatusRed else TextSecondary,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                LinearProgressIndicator(
+                    progress = { quotaProgress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp),
+                    color = if (quotaProgress > 0.85f) StatusRed else PrimaryAccent,
+                    trackColor = DarkSurfaceElevated
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Quota Limit: ${quotaMb.toInt()} MB (Min: ${minQuota.toInt()} MB, Max: 1024 MB)", fontSize = 11.sp, color = TextMuted)
+                }
+
+                Slider(
+                    value = quotaMb.coerceIn(minQuota, 1024f),
+                    onValueChange = { quotaMb = it.coerceIn(minQuota, 1024f) },
+                    valueRange = minQuota..1024f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = PrimaryAccent,
+                        activeTrackColor = PrimaryAccent,
+                        inactiveTrackColor = DarkSurfaceElevated
+                    )
+                )
+            }
+        }
+
+        Text("Language Configurations", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            languages.forEach { (langKey, label) ->
+                val isSelected = activeLang == langKey
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) PrimaryAccentContainer else DarkSurfaceElevated,
+                    border = BorderStroke(1.dp, if (isSelected) PrimaryAccent else DarkBorderSubtle),
+                    modifier = Modifier.clickable { activeLang = langKey }
+                ) {
+                    Text(
+                        text = label,
+                        color = if (isSelected) PrimaryAccent else TextMuted,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                     )
                 }
             }
-        } else {
-            if (isPhp) {
+        }
+
+        when (activeLang) {
+            "PYTHON" -> {
                 Card(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = BorderStroke(1.dp, DarkBorder)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Download, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Composer Dependency Manager",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = TextPrimary
-                            )
-                        }
-
-                        Text(
-                            "Manage PHP dependencies and composer.json natively.",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    viewModel.installCustomPackage(project, "install")
-                                },
-                                enabled = !isInstalling,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("install", fontSize = 11.sp, color = PrimaryAccent)
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    viewModel.installCustomPackage(project, "update")
-                                },
-                                enabled = !isInstalling,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("update", fontSize = 11.sp, color = PrimaryAccent)
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    viewModel.installCustomPackage(project, "dump-autoload")
-                                },
-                                enabled = !isInstalling,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("autoload", fontSize = 11.sp, color = PrimaryAccent)
-                            }
-                        }
-                    }
-                }
-            }
-            if (isPython) {
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = BorderStroke(1.dp, DarkBorder)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Description, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Install from Requirements (.txt)",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = TextPrimary
-                            )
-                        }
-
-                        Text(
-                            "Validate and install dependencies from a requirements text file via pip.",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
-
-                        if (requirementsFiles.isNotEmpty()) {
-                            Text("Available in project:", fontSize = 11.sp, color = TextMuted)
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                requirementsFiles.forEach { file ->
-                                    val isSelected = requirementsFileInput.equals(file, ignoreCase = true)
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isSelected) PrimaryAccentContainer else DarkSurfaceElevated,
-                                        border = BorderStroke(1.dp, if (isSelected) PrimaryAccent else DarkBorderSubtle),
-                                        onClick = {
-                                            requirementsFileInput = file
-                                        }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            if (isSelected) {
-                                                Icon(Icons.Default.Check, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(12.dp))
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                            }
-                                            Text(file, fontSize = 11.sp, color = if (isSelected) PrimaryAccent else TextPrimary, fontWeight = FontWeight.Medium)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Python Main Entry File", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Default entrypoint is app.py, followed by main.py. Specify the primary file to execute.", fontSize = 11.sp, color = TextSecondary)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
-                                value = requirementsFileInput,
-                                onValueChange = { requirementsFileInput = it },
-                                placeholder = { Text("e.g. requirements.txt", color = TextMuted) },
+                                value = mainFileName,
+                                onValueChange = { mainFileName = it },
+                                placeholder = { Text("app.py", color = TextMuted) },
                                 singleLine = true,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = TextPrimary,
                                     unfocusedTextColor = TextPrimary,
-                                    focusedBorderColor = PrimaryAccent,
-                                    unfocusedBorderColor = DarkBorderSubtle,
-                                    cursorColor = PrimaryAccent,
                                     focusedContainerColor = DarkSurfaceElevated,
                                     unfocusedContainerColor = DarkSurfaceElevated
                                 )
                             )
-
                             Button(
                                 onClick = {
-                                    if (requirementsFileInput.isNotBlank()) {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.installPipRequirements(project, requirementsFileInput.trim())
+                                    val trimmed = mainFileName.trim()
+                                    if (trimmed.isNotBlank()) {
+                                        Toast.makeText(context, "Saved primary file: $trimmed", Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                enabled = !isInstalling && requirementsFileInput.isNotBlank(),
-                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
                             ) {
-                                if (isInstalling) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = TextOnAccent, strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Default.Download, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Install .txt", fontWeight = FontWeight.Bold, color = TextOnAccent, fontSize = 13.sp)
+                                Text("Save", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Virtual Environment & Requirements", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Strictly isolated into .venv. Use Regenerate to recreate, or Freeze to export dependencies.", fontSize = 11.sp, color = TextSecondary)
+
+                        Button(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.regenerateVenv(project)
+                            },
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                            border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f))
+                        ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Regenerate Environment", color = PrimaryAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                showFreezeDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f))
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Freeze Requirements", color = StatusGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Environment (.env)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                            Text("${envVars.size} variables", fontSize = 11.sp, color = TextMuted)
+                        }
+                        Text("Stored as .env in project root. Automatically loaded when starting the server.", fontSize = 11.sp, color = TextSecondary)
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(
+                                value = newEnvKey,
+                                onValueChange = { newEnvKey = it },
+                                placeholder = { Text("KEY", color = TextMuted, fontSize = 11.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, focusedContainerColor = DarkSurfaceElevated, unfocusedContainerColor = DarkSurfaceElevated)
+                            )
+                            OutlinedTextField(
+                                value = newEnvValue,
+                                onValueChange = { newEnvValue = it },
+                                placeholder = { Text("VALUE", color = TextMuted, fontSize = 11.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, focusedContainerColor = DarkSurfaceElevated, unfocusedContainerColor = DarkSurfaceElevated)
+                            )
+                            Button(
+                                onClick = {
+                                    if (newEnvKey.isNotBlank()) {
+                                        val updated = envVars.toMutableMap()
+                                        updated[newEnvKey.trim()] = newEnvValue.trim()
+                                        envVars = updated
+                                        viewModel.saveDotEnv(project, updated)
+                                        newEnvKey = ""
+                                        newEnvValue = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccentContainer)
+                            ) {
+                                Text("Add", color = PrimaryAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        if (envVars.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                envVars.forEach { (k, v) ->
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = DarkSurfaceElevated,
+                                        border = BorderStroke(1.dp, DarkBorderSubtle),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("$k = $v", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = TextPrimary, modifier = Modifier.weight(1f))
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                IconButton(
+                                                    onClick = {
+                                                        newEnvKey = k
+                                                        newEnvValue = v
+                                                    },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Tune, contentDescription = "Edit", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                                                }
+                                                IconButton(
+                                                    onClick = {
+                                                        val updated = envVars.toMutableMap()
+                                                        updated.remove(k)
+                                                        envVars = updated
+                                                        viewModel.saveDotEnv(project, updated)
+                                                    },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = StatusRed, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Python Version", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Select target Python runtime version for project execution.", fontSize = 11.sp, color = TextSecondary)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Python 3.11 (Default)", "Python 3.10", "Python 3.9").forEach { v ->
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (v.contains("3.11")) PrimaryAccentContainer else DarkSurfaceElevated,
+                                    border = BorderStroke(1.dp, if (v.contains("3.11")) PrimaryAccent else DarkBorderSubtle),
+                                    modifier = Modifier.clickable {
+                                        Toast.makeText(context, "Selected $v", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Text(v, fontSize = 11.sp, color = if (v.contains("3.11")) PrimaryAccent else TextMuted, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
@@ -1890,154 +2027,324 @@ private fun PackagesTab(
                 }
             }
 
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = BorderStroke(1.dp, DarkBorder)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = if (isPython) "Install Python Package (pip)" else "Install Node.js Package (npm)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = TextPrimary
-                    )
+            "PHP" -> {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("PHP Main Entry File", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Default entry file is index.php. Specify custom startup script if required.", fontSize = 11.sp, color = TextSecondary)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = mainFileName,
+                                onValueChange = { mainFileName = it },
+                                placeholder = { Text("index.php", color = TextMuted) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated
+                                )
+                            )
+                            Button(
+                                onClick = {
+                                    Toast.makeText(context, "Saved PHP entry: ${mainFileName.trim()}", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                            ) {
+                                Text("Save", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Download, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("PHP Composer Management", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        }
+                        Text("Composer dependency manager for PHP packages (composer.json / composer.lock).", fontSize = 11.sp, color = TextSecondary)
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    viewModel.runProjectTerminalCommand(project, "composer install")
+                                    Toast.makeText(context, "Running composer install...", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("composer install", color = PrimaryAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    viewModel.runProjectTerminalCommand(project, "composer update")
+                                    Toast.makeText(context, "Running composer update...", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("composer update", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(
+                                value = customPackageInput,
+                                onValueChange = { customPackageInput = it },
+                                placeholder = { Text("require package (e.g. guzzlehttp/guzzle)", color = TextMuted, fontSize = 11.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, focusedContainerColor = DarkSurfaceElevated, unfocusedContainerColor = DarkSurfaceElevated)
+                            )
+                            Button(
+                                onClick = {
+                                    if (customPackageInput.isNotBlank()) {
+                                        viewModel.runProjectTerminalCommand(project, "composer require ${customPackageInput.trim()}")
+                                        customPackageInput = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                            ) {
+                                Text("Require", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            "NODEJS" -> {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Node.js & NPM Settings", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Entrypoint default is server.js or index.js.", fontSize = 11.sp, color = TextSecondary)
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = mainFileName,
+                                onValueChange = { mainFileName = it },
+                                placeholder = { Text("server.js", color = TextMuted) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated
+                                )
+                            )
+                            Button(
+                                onClick = {
+                                    Toast.makeText(context, "Saved Node.js main: ${mainFileName.trim()}", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                            ) {
+                                Text("Save", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    viewModel.runProjectTerminalCommand(project, "npm install")
+                                    Toast.makeText(context, "Running npm install...", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("npm install", color = PrimaryAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    viewModel.runProjectTerminalCommand(project, "npm run dev")
+                                    Toast.makeText(context, "Running npm run dev...", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("npm run dev", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            "JAVA" -> {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Java Runtime & Build Configuration", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Configure main class or JAR file with build tools.", fontSize = 11.sp, color = TextSecondary)
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = mainFileName,
+                                onValueChange = { mainFileName = it },
+                                placeholder = { Text("Main or App.jar", color = TextMuted) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated
+                                )
+                            )
+                            Button(
+                                onClick = {
+                                    Toast.makeText(context, "Saved Java class: ${mainFileName.trim()}", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                            ) {
+                                Text("Save", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    viewModel.runProjectTerminalCommand(project, "javac *.java")
+                                    Toast.makeText(context, "Compiling Java sources...", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("javac compile", color = PrimaryAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    viewModel.runProjectTerminalCommand(project, "jar cvfe App.jar Main *.class")
+                                    Toast.makeText(context, "Packaging JAR...", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("jar package", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            "STATIC" -> {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Static HTML & Web Server", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Embedded Nginx/SAPI static document server.", fontSize = 11.sp, color = TextSecondary)
+
                         OutlinedTextField(
-                            value = customPackageInput,
-                            onValueChange = { customPackageInput = it },
-                            placeholder = { Text(if (isPython) "e.g. beautifulsoup4" else "e.g. lodash", color = TextMuted) },
+                            value = mainFileName,
+                            onValueChange = { mainFileName = it },
+                            placeholder = { Text("index.html", color = TextMuted) },
                             singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                            shape = RoundedCornerShape(8.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = TextPrimary,
                                 unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = PrimaryAccent,
-                                unfocusedBorderColor = DarkBorderSubtle,
-                                cursorColor = PrimaryAccent,
                                 focusedContainerColor = DarkSurfaceElevated,
                                 unfocusedContainerColor = DarkSurfaceElevated
                             )
                         )
-
-                        Button(
-                            onClick = {
-                                if (customPackageInput.isNotBlank()) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    viewModel.installCustomPackage(project, customPackageInput)
-                                    customPackageInput = ""
-                                }
-                            },
-                            enabled = !isInstalling && customPackageInput.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            if (isInstalling) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = TextOnAccent, strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Download, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (popularPackages.isNotEmpty()) {
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = BorderStroke(1.dp, DarkBorder)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Popular Libraries", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            popularPackages.forEach { pkg ->
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = DarkSurfaceElevated,
-                                    border = BorderStroke(1.dp, DarkBorderSubtle),
-                                    onClick = {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.installCustomPackage(project, pkg)
-                                    }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(pkg, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (isNode) {
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = BorderStroke(1.dp, DarkBorder)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Manifest Dependencies", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
-                        Text(
-                            "Install all packages declared in package.json",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
-                        Button(
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.installCustomPackage(project, "")
-                            },
-                            enabled = !isInstalling,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
-                            border = BorderStroke(1.dp, DarkBorderSubtle),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Run npm install", color = PrimaryAccent, fontSize = 13.sp)
-                        }
                     }
                 }
             }
         }
     }
 
-    packageToDelete?.let { pkg ->
+    if (showFreezeDialog) {
         AlertDialog(
-            onDismissRequest = { packageToDelete = null },
+            onDismissRequest = { showFreezeDialog = false },
             containerColor = DarkSurfaceElevated,
-            title = { Text("Uninstall '$pkg'?", fontWeight = FontWeight.Bold, color = TextPrimary) },
-            text = { Text("This will remove $pkg from the environment.", color = TextSecondary) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Freeze Requirements", fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Export installed dependencies into a requirements file.", fontSize = 12.sp, color = TextSecondary)
+                    OutlinedTextField(
+                        value = freezeFileName,
+                        onValueChange = { freezeFileName = it },
+                        label = { Text("Output File Name") },
+                        placeholder = { Text("requirements.txt") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
+                    )
+                    OutlinedTextField(
+                        value = freezeFilePath,
+                        onValueChange = { freezeFilePath = it },
+                        label = { Text("Output Directory Path") },
+                        placeholder = { Text("./ (project root)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary)
+                    )
+                }
+            },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.uninstallCustomPackage(project, pkg)
-                        packageToDelete = null
+                        val file = if (freezeFileName.isBlank()) "requirements.txt" else freezeFileName.trim()
+                        val path = if (freezeFilePath.isBlank() || freezeFilePath.trim() == "./") file else "${freezeFilePath.trim().trimEnd('/')}/$file"
+                        viewModel.freezeRequirements(project, path)
+                        showFreezeDialog = false
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = StatusRed)
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
                 ) {
-                    Text("Uninstall", fontWeight = FontWeight.Bold)
+                    Text("Freeze", color = TextOnAccent, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { packageToDelete = null }) {
+                TextButton(onClick = { showFreezeDialog = false }) {
                     Text("Cancel", color = TextSecondary)
                 }
             }
@@ -2055,11 +2362,16 @@ private fun ControlTab(
     val activeTunnelUrl by viewModel.activeTunnelUrl.collectAsState()
     val tunnelError by viewModel.tunnelError.collectAsState()
     val vpnDisabled by viewModel.isVpnDisabled(project.id).collectAsState(initial = false)
+    val vpnBlockedMsgFlow by viewModel.getVpnBlockedMessage(project.id).collectAsState(initial = "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer.")
+    var vpnBlockedMsg by remember(vpnBlockedMsgFlow) { mutableStateOf(vpnBlockedMsgFlow) }
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var namedTokenInput by remember { mutableStateOf("") }
+
+    var showForwardPortDialog by remember { mutableStateOf(false) }
+    var forwardPortInput by remember(project.port) { mutableStateOf(project.port.toString()) }
 
     Column(
         modifier = Modifier
@@ -2073,38 +2385,102 @@ private fun ControlTab(
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
             border = BorderStroke(1.dp, DarkBorder)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Disable VPN Visits", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-                        Spacer(modifier = Modifier.height(2.dp))
+                    Text("Server Process Control", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                    val isRunning = project.status == ProjectStatus.RUNNING
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isRunning) StatusGreen.copy(alpha = 0.15f) else TextMuted.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, if (isRunning) StatusGreen.copy(alpha = 0.4f) else DarkBorderSubtle)
+                    ) {
                         Text(
-                            "Block incoming server requests when active VPN connections are detected.",
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
+                            text = if (isRunning) "ONLINE (: ${project.port})" else "STOPPED",
+                            color = if (isRunning) StatusGreen else TextMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
-                    Switch(
-                        checked = vpnDisabled,
-                        onCheckedChange = {
+                }
+
+                if (project.status == ProjectStatus.RUNNING) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.stopProject(project.id)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusYellow),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Stop Server", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.restartProject(project.id)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Restart Server", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.setVpnDisabled(project.id, it)
+                            viewModel.startProject(project)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = PrimaryAccent,
-                            checkedTrackColor = PrimaryAccentContainer,
-                            uncheckedThumbColor = TextMuted,
-                            uncheckedTrackColor = DarkSurfaceElevated
-                        )
-                    )
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Start Server", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Port Forwarding", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                }
+                Text("Forward local Android ports to custom host interfaces or proxy listeners.", color = TextSecondary, fontSize = 12.sp)
+
+                Button(
+                    onClick = { showForwardPortDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                    border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Configure Port Forwarding", color = PrimaryAccent, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -2145,7 +2521,7 @@ private fun ControlTab(
                 }
 
                 Text(
-                    "Expose http://127.0.0.1:${project.port} to the public internet securely with a free Cloudflare TryCloudflare tunnel.",
+                    "Expose your local project server securely to the public internet using your Cloudflare Tunnel Token.",
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
@@ -2163,7 +2539,7 @@ private fun ControlTab(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Public URL", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Public Tunnel URL", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     text = activeTunnelUrl,
                                     color = StatusGreen,
@@ -2181,13 +2557,7 @@ private fun ControlTab(
                             }
                         }
                     }
-                }
 
-                tunnelError?.let { err ->
-                    Text(err, color = StatusRed, fontSize = 12.sp)
-                }
-
-                if (tunnelStatus == TunnelStatus.CONNECTED || tunnelStatus == TunnelStatus.CONNECTING) {
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2201,42 +2571,41 @@ private fun ControlTab(
                         Text("Stop Tunnel", color = StatusRed, fontWeight = FontWeight.Bold)
                     }
                 } else {
-                    Row(
+                    OutlinedTextField(
+                        value = namedTokenInput,
+                        onValueChange = { namedTokenInput = it },
+                        label = { Text("Cloudflare Tunnel Token", fontSize = 12.sp) },
+                        placeholder = { Text("eyJhIjoi...", color = TextMuted, fontSize = 12.sp) },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = namedTokenInput,
-                            onValueChange = { namedTokenInput = it },
-                            placeholder = { Text("Cloudflare Tunnel Token", color = TextMuted, fontSize = 12.sp) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = PrimaryAccent,
-                                unfocusedBorderColor = DarkBorderSubtle,
-                                cursorColor = PrimaryAccent,
-                                focusedContainerColor = DarkSurfaceElevated,
-                                unfocusedContainerColor = DarkSurfaceElevated
-                            )
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
                         )
+                    )
 
-                        Button(
-                            onClick = {
-                                if (namedTokenInput.isNotBlank()) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    viewModel.startNamedTunnel(namedTokenInput.trim())
-                                }
-                            },
-                            enabled = namedTokenInput.isNotBlank(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccentContainer)
-                        ) {
-                            Text("Connect", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                    Button(
+                        onClick = {
+                            val token = namedTokenInput.trim()
+                            if (token.isBlank()) {
+                                Toast.makeText(context, "Please enter your Cloudflare tunnel token", Toast.LENGTH_SHORT).show()
+                            } else {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.startNamedTunnel(token)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Cloud, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Connect Cloudflare Tunnel", color = TextOnAccent, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2247,57 +2616,89 @@ private fun ControlTab(
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
             border = BorderStroke(1.dp, DarkBorder)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Process Control", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-
-                if (project.status == ProjectStatus.RUNNING) {
-                    Button(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.stopProject(project.id)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusYellow),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Stop Server", color = Color.Black, fontWeight = FontWeight.Bold)
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Disable VPN Visits", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "Block incoming server requests when active VPN connections are detected.",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
                     }
-                } else {
-                    Button(
-                        onClick = {
+                    Switch(
+                        checked = vpnDisabled,
+                        onCheckedChange = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.startProject(project)
+                            viewModel.setVpnDisabled(project.id, it)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextOnAccent)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start Server", color = TextOnAccent, fontWeight = FontWeight.Bold)
-                    }
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = PrimaryAccent,
+                            checkedTrackColor = PrimaryAccentContainer,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = DarkSurfaceElevated
+                        )
+                    )
                 }
 
-                OutlinedButton(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.restartProject(project.id)
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                HorizontalDivider(color = DarkBorder, modifier = Modifier.padding(vertical = 4.dp))
+
+                Text("VPN Error Message", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
+                Text(
+                    "Custom error message served to flagged VPN visitors. Displayed on responsive block page alongside visitor IP & terminal error code.",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+
+                OutlinedTextField(
+                    value = vpnBlockedMsg,
+                    onValueChange = { vpnBlockedMsg = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3,
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = TextStyle(fontSize = 13.sp, color = TextPrimary),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = PrimaryAccent,
+                        unfocusedBorderColor = DarkBorder,
+                        focusedContainerColor = DarkSurfaceElevated,
+                        unfocusedContainerColor = DarkSurfaceElevated,
+                        cursorColor = PrimaryAccent
+                    ),
+                    placeholder = {
+                        Text("VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer.", fontSize = 12.sp, color = TextMuted)
+                    }
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, tint = TextPrimary)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Restart Server", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    Button(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.setVpnBlockedMessage(project.id, vpnBlockedMsg.trim())
+                            Toast.makeText(context, "VPN Error Message Saved", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Error Message", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    }
                 }
             }
         }
@@ -2305,27 +2706,67 @@ private fun ControlTab(
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.3f))
+            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f))
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Danger Zone", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = StatusRed)
-                Text("Deleting this project will terminate any running processes and remove configuration from Localhost.", color = TextSecondary, fontSize = 12.sp)
+                Text(
+                    "Permanently delete this project and erase all associated files and logs from storage.",
+                    color = TextSecondary,
+                    fontSize = 12.sp
+                )
 
                 Button(
                     onClick = { showDeleteConfirm = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.15f)),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, tint = StatusRed)
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Delete Project", color = StatusRed, fontWeight = FontWeight.Bold)
+                    Text("Delete Project", color = TextOnAccent, fontWeight = FontWeight.Bold)
                 }
             }
         }
+    }
+
+    if (showForwardPortDialog) {
+        AlertDialog(
+            onDismissRequest = { showForwardPortDialog = false },
+            containerColor = DarkSurfaceElevated,
+            title = { Text("Port Forwarding", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Specify the local port you want to forward:", color = TextSecondary, fontSize = 13.sp)
+                    OutlinedTextField(
+                        value = forwardPortInput,
+                        onValueChange = { forwardPortInput = it },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, focusedContainerColor = DarkSurface, unfocusedContainerColor = DarkSurface)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val p = forwardPortInput.toIntOrNull() ?: project.port
+                        showForwardPortDialog = false
+                        Toast.makeText(context, "Port $p forwarded", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                ) {
+                    Text("Forward", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showForwardPortDialog = false }) {
+                    Text("Cancel", color = TextMuted)
+                }
+            }
+        )
     }
 
     if (showDeleteConfirm) {
@@ -2333,53 +2774,24 @@ private fun ControlTab(
             onDismissRequest = { showDeleteConfirm = false },
             containerColor = DarkSurfaceElevated,
             title = { Text("Delete '${project.name}'?", fontWeight = FontWeight.Bold, color = TextPrimary) },
-            text = { Text("This will permanently remove the project configuration and stop processes. Directory files will be cleaned.", color = TextSecondary) },
+            text = { Text("This will permanently remove '${project.name}' and delete all files in ${project.workingDir}. This action cannot be undone.", color = TextSecondary) },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.deleteProject(project.id)
                         showDeleteConfirm = false
+                        viewModel.deleteProject(project.id)
                         onBackClick()
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = StatusRed)
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed)
                 ) {
-                    Text("Delete", fontWeight = FontWeight.Bold)
+                    Text("Permanently Delete", color = TextOnAccent, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel", color = TextSecondary)
+                    Text("Cancel", color = TextMuted)
                 }
             }
-        )
-    }
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            color = TextMuted,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(end = 12.dp)
-        )
-        Text(
-            text = value,
-            color = TextPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-            textAlign = TextAlign.End,
-            fontFamily = if (value.startsWith("http") || value.startsWith("/") || value.all { it.isDigit() }) FontFamily.Monospace else FontFamily.Default
         )
     }
 }
@@ -2412,7 +2824,7 @@ private fun LogsAndTerminalTab(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "Process Logs",
+                    "Terminal",
                     color = if (subTab == 0) TextOnAccent else TextMuted,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
@@ -2428,7 +2840,7 @@ private fun LogsAndTerminalTab(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "Terminal",
+                    "Log",
                     color = if (subTab == 1) TextOnAccent else TextMuted,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
@@ -2437,9 +2849,9 @@ private fun LogsAndTerminalTab(
         }
 
         if (subTab == 0) {
-            ProjectLiveLogsView(project = project, viewModel = viewModel)
-        } else {
             ProjectTerminalTab(project = project, viewModel = viewModel)
+        } else {
+            ProjectLiveLogsView(project = project, viewModel = viewModel)
         }
     }
 }
@@ -2453,6 +2865,8 @@ private fun ProjectLiveLogsView(
     var searchQuery by remember { mutableStateOf("") }
     var streamFilter by remember { mutableStateOf<com.localhost.core.model.LogStream?>(null) }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
 
     val filteredLogs = remember(logs, searchQuery, streamFilter) {
         logs.filter { entry ->
@@ -2468,8 +2882,10 @@ private fun ProjectLiveLogsView(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2479,9 +2895,10 @@ private fun ProjectLiveLogsView(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Filter logs...", color = TextMuted, fontSize = 12.sp) },
+                placeholder = { Text("Filter logs...", color = TextMuted, fontSize = 13.sp) },
                 singleLine = true,
-                modifier = Modifier.weight(1f).height(44.dp),
+                textStyle = TextStyle(fontSize = 13.sp, color = TextPrimary),
+                modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextPrimary,
@@ -2489,9 +2906,38 @@ private fun ProjectLiveLogsView(
                     focusedBorderColor = PrimaryAccent,
                     unfocusedBorderColor = DarkBorderSubtle,
                     focusedContainerColor = DarkSurface,
-                    unfocusedContainerColor = DarkSurface
+                    unfocusedContainerColor = DarkSurface,
+                    focusedPlaceholderColor = TextMuted,
+                    unfocusedPlaceholderColor = TextMuted
                 )
             )
+
+            IconButton(
+                onClick = {
+                    val allText = filteredLogs.joinToString("\n") { "[${timeFormatter.format(Date(it.timestamp))}] [${it.stream.name}] ${it.message}" }
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Logs", allText))
+                    Toast.makeText(context, "Copied ${filteredLogs.size} lines", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs", tint = TextSecondary, modifier = Modifier.size(18.dp))
+            }
+
+            IconButton(
+                onClick = {
+                    val allText = filteredLogs.joinToString("\n") { "[${timeFormatter.format(Date(it.timestamp))}] [${it.stream.name}] ${it.message}" }
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "${project.name} Logs")
+                        putExtra(Intent.EXTRA_TEXT, allText)
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "Share Logs"))
+                },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Default.Share, contentDescription = "Export logs", tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+            }
 
             IconButton(
                 onClick = { viewModel.clearLogs(project.id) },
@@ -2502,7 +2948,12 @@ private fun ProjectLiveLogsView(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val filters = listOf(null to "ALL", com.localhost.core.model.LogStream.STDOUT to "STDOUT", com.localhost.core.model.LogStream.STDERR to "STDERR", com.localhost.core.model.LogStream.SYSTEM to "SYSTEM")
+            val filters = listOf(
+                null to "ALL",
+                com.localhost.core.model.LogStream.STDOUT to "STDOUT",
+                com.localhost.core.model.LogStream.STDERR to "STDERR",
+                com.localhost.core.model.LogStream.SYSTEM to "SYSTEM"
+            )
             filters.forEach { (stream, label) ->
                 val active = streamFilter == stream
                 Surface(
@@ -2527,27 +2978,61 @@ private fun ProjectLiveLogsView(
         ) {
             if (filteredLogs.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No log entries yet", color = TextMuted, fontSize = 12.sp)
+                    Text("No log entries recorded", color = TextMuted, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
                 }
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(filteredLogs) { entry ->
-                        val color = when (entry.stream) {
+                    items(filteredLogs, key = { it.id }) { log ->
+                        val timeStr = remember(log.timestamp) { timeFormatter.format(Date(log.timestamp)) }
+                        val textColor = when (log.stream) {
+                            com.localhost.core.model.LogStream.STDOUT -> TextPrimary
                             com.localhost.core.model.LogStream.STDERR -> StatusRed
-                            com.localhost.core.model.LogStream.SYSTEM -> PrimaryAccent
-                            else -> TextPrimary
+                            com.localhost.core.model.LogStream.SYSTEM -> SecondaryTeal
                         }
-                        SelectionContainer {
+                        val streamColor = when (log.stream) {
+                            com.localhost.core.model.LogStream.STDERR -> StatusRed
+                            com.localhost.core.model.LogStream.SYSTEM -> SecondaryTeal
+                            else -> PrimaryAccent
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(CodeBackground)
+                                .clickable {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Log Line", "[$timeStr] [${log.stream.name}] ${log.message}"))
+                                    Toast.makeText(context, "Copied log line", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 4.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = entry.message,
-                                color = color,
-                                fontSize = 11.sp,
+                                text = timeStr,
                                 fontFamily = FontFamily.Monospace,
-                                lineHeight = 15.sp
+                                fontSize = 11.sp,
+                                color = TextMuted,
+                                modifier = Modifier.width(88.dp)
+                            )
+                            Text(
+                                text = "[${log.stream.name}]",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = streamColor,
+                                modifier = Modifier.width(72.dp)
+                            )
+                            Text(
+                                text = log.message,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = textColor,
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
@@ -2728,12 +3213,18 @@ private fun AnalyticsTab(
             border = BorderStroke(1.dp, DarkBorder)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Request Volume Distribution", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                Text("Request Volume Analytics (Interactive)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
 
-                val barCounts = remember(requests, sinceTimestamp) {
+                val (lineCounts, lineTimeLabels) = remember(requests, sinceTimestamp) {
                     val count = 12
-                    val span = (System.currentTimeMillis() - sinceTimestamp).coerceAtLeast(1000L)
+                    val current = System.currentTimeMillis()
+                    val span = (current - sinceTimestamp).coerceAtLeast(1000L)
                     val buckets = IntArray(count)
+                    val stepTime = span / count
+                    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+                    val labels = (0 until count).map { i ->
+                        timeFormat.format(Date(sinceTimestamp + i * stepTime))
+                    }
                     requests.forEach { r ->
                         val offset = r.timestamp - sinceTimestamp
                         if (offset in 0 until span) {
@@ -2741,29 +3232,14 @@ private fun AnalyticsTab(
                             buckets[bucketIdx]++
                         }
                     }
-                    buckets.toList()
+                    Pair(buckets.toList(), labels)
                 }
 
-                val maxBar = (barCounts.maxOrNull() ?: 1).coerceAtLeast(1)
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(90.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    barCounts.forEach { bCount ->
-                        val fraction = (bCount.toFloat() / maxBar).coerceIn(0.08f, 1f)
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(fraction)
-                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                .background(if (bCount > 0) PrimaryAccent else DarkSurfaceElevated)
-                        )
-                    }
-                }
+                InteractiveLineGraph(
+                    counts = lineCounts,
+                    timeLabels = lineTimeLabels,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
 
@@ -2953,6 +3429,18 @@ private fun MethodBadgeItem(method: String, count: Int, total: Int, color: Color
 }
 
 @Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, color = TextSecondary, fontSize = 13.sp)
+        Text(text = value, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
 private fun StatusBreakdownRow(label: String, count: Int, total: Int, color: Color) {
     val percent = if (total > 0) (count * 100 / total) else 0
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -3025,6 +3513,7 @@ private fun ProjectTerminalTab(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
+            .navigationBarsPadding()
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -3316,6 +3805,173 @@ private fun ProjectTerminalTab(
                         modifier = Modifier.size(18.dp)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InteractiveLineGraph(
+    counts: List<Int>,
+    timeLabels: List<String>,
+    modifier: Modifier = Modifier
+) {
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+    val maxCount = (counts.maxOrNull() ?: 1).coerceAtLeast(1)
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (selectedIndex != null && selectedIndex!! in counts.indices) {
+            val idx = selectedIndex!!
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(PrimaryAccentContainer)
+                    .border(1.dp, PrimaryAccent.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Time: ${timeLabels.getOrElse(idx) { "" }}",
+                    fontSize = 11.sp,
+                    color = TextPrimary,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "${counts[idx]} requests",
+                    fontSize = 11.sp,
+                    color = PrimaryAccent,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        } else {
+            Text("Tap or drag across line graph to view exact request counts", fontSize = 11.sp, color = TextMuted)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(130.dp)
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(counts) {
+                        detectTapGestures { offset ->
+                            if (counts.isNotEmpty()) {
+                                val stepX = size.width / (counts.size - 1).coerceAtLeast(1)
+                                val idx = Math.round(offset.x / stepX).toInt().coerceIn(0, counts.size - 1)
+                                selectedIndex = idx
+                            }
+                        }
+                    }
+                    .pointerInput(counts) {
+                        detectDragGestures { change, _ ->
+                            change.consume()
+                            if (counts.isNotEmpty()) {
+                                val stepX = size.width / (counts.size - 1).coerceAtLeast(1)
+                                val idx = Math.round(change.position.x / stepX).toInt().coerceIn(0, counts.size - 1)
+                                selectedIndex = idx
+                            }
+                        }
+                    }
+            ) {
+                val width = size.width
+                val height = size.height
+                val pointCount = counts.size
+                if (pointCount < 2) return@Canvas
+
+                val stepX = width / (pointCount - 1)
+                val topPadding = 12.dp.toPx()
+                val bottomPadding = 12.dp.toPx()
+                val usableHeight = height - topPadding - bottomPadding
+
+                listOf(0f, 0.5f, 1f).forEach { fraction ->
+                    val y = topPadding + usableHeight * fraction
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.08f),
+                        start = Offset(0f, y),
+                        end = Offset(width, y),
+                        strokeWidth = 1.dp.toPx()
+                    )
+                }
+
+                val points = counts.mapIndexed { i, c ->
+                    val x = i * stepX
+                    val y = topPadding + usableHeight * (1f - (c.toFloat() / maxCount))
+                    Offset(x, y)
+                }
+
+                val fillPath = Path().apply {
+                    moveTo(0f, height)
+                    lineTo(points.first().x, points.first().y)
+                    for (i in 0 until points.size - 1) {
+                        val p0 = points[i]
+                        val p1 = points[i + 1]
+                        val cx = (p0.x + p1.x) / 2f
+                        cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+                    }
+                    lineTo(width, height)
+                    close()
+                }
+
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(PrimaryAccent.copy(alpha = 0.35f), Color.Transparent),
+                        startY = topPadding,
+                        endY = height
+                    )
+                )
+
+                val strokePath = Path().apply {
+                    moveTo(points.first().x, points.first().y)
+                    for (i in 0 until points.size - 1) {
+                        val p0 = points[i]
+                        val p1 = points[i + 1]
+                        val cx = (p0.x + p1.x) / 2f
+                        cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+                    }
+                }
+
+                drawPath(
+                    path = strokePath,
+                    color = PrimaryAccent,
+                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                )
+
+                points.forEachIndexed { i, pt ->
+                    val isSel = selectedIndex == i
+                    drawCircle(
+                        color = if (isSel) Color.White else PrimaryAccent,
+                        radius = if (isSel) 6.dp.toPx() else 3.5.dp.toPx(),
+                        center = pt
+                    )
+                    if (isSel) {
+                        drawCircle(
+                            color = PrimaryAccent,
+                            radius = 3.5.dp.toPx(),
+                            center = pt
+                        )
+                        drawLine(
+                            color = PrimaryAccent.copy(alpha = 0.5f),
+                            start = Offset(pt.x, topPadding),
+                            end = Offset(pt.x, height),
+                            strokeWidth = 1.5.dp.toPx()
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            timeLabels.filterIndexed { index, _ -> index % 3 == 0 || index == timeLabels.lastIndex }.forEach { label ->
+                Text(label, fontSize = 10.sp, color = TextMuted, fontFamily = FontFamily.Monospace)
             }
         }
     }

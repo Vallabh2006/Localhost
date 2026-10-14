@@ -1,4 +1,16 @@
 package com.localhost.feature.projects
+
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Check
+
 import androidx.compose.foundation.layout.WindowInsets
 
 import com.localhost.core.designsystem.theme.StatusGreen
@@ -126,9 +138,8 @@ fun ProjectListScreen(
 
     var qrDialogUrl by remember { mutableStateOf<String?>(null) }
     var browserPreviewUrl by remember { mutableStateOf<String?>(null) }
-    var showGithubDialog by remember { mutableStateOf(false) }
-    var githubUrlInput by remember { mutableStateOf("") }
-    var githubCustomName by remember { mutableStateOf("") }
+    var showNewProjectDialog by remember { mutableStateOf(false) }
+    var newProjectSource by remember { mutableStateOf("EMPTY") }
     var searchQuery by remember { mutableStateOf("") }
 
     val zipImportLauncher = rememberLauncherForActivityResult(
@@ -138,6 +149,10 @@ fun ProjectListScreen(
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             viewModel.importProjectZip(context, it)
         }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.syncProjectsFromFilesystem(context.filesDir)
     }
 
     LaunchedEffect(message) {
@@ -195,7 +210,8 @@ fun ProjectListScreen(
                 },
                 actions = {
                     IconButton(onClick = {
-                        showGithubDialog = true
+                        newProjectSource = "GITHUB"
+                        showNewProjectDialog = true
                     }) {
                         Icon(
                             Icons.Default.CloudDownload,
@@ -204,8 +220,8 @@ fun ProjectListScreen(
                         )
                     }
                     IconButton(onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        zipImportLauncher.launch("*/*")
+                        newProjectSource = "ZIP"
+                        showNewProjectDialog = true
                     }) {
                         Icon(
                             Icons.Default.DriveFolderUpload,
@@ -224,7 +240,8 @@ fun ProjectListScreen(
             FloatingActionButton(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onCreateClick()
+                    newProjectSource = "EMPTY"
+                    showNewProjectDialog = true
                 },
                 containerColor = PrimaryAccent,
                 contentColor = TextOnAccent,
@@ -278,7 +295,10 @@ fun ProjectListScreen(
                     title = "No Projects Yet",
                     description = "Create a project or tap the import icon above to load a ZIP archive.",
                     actionLabel = "Create Project",
-                    onActionClick = onCreateClick,
+                    onActionClick = {
+                        newProjectSource = "EMPTY"
+                        showNewProjectDialog = true
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (filteredProjects.isEmpty()) {
@@ -353,75 +373,398 @@ fun ProjectListScreen(
         }
     }
 
-    if (showGithubDialog) {
+    if (showNewProjectDialog) {
+        var step by remember { mutableIntStateOf(1) }
+        var source by remember { mutableStateOf(newProjectSource) }
+        var name by remember { mutableStateOf("") }
+        var portStr by remember { mutableStateOf("8000") }
+        var userChangedPort by remember { mutableStateOf(false) }
+        var selectedRuntime by remember { mutableStateOf(com.localhost.core.model.RuntimeType.PYTHON) }
+        var githubUrl by remember { mutableStateOf("") }
+        var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
+        var selectedZipName by remember { mutableStateOf<String?>(null) }
+
+        val newProjectZipLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+            uri?.let {
+                selectedZipUri = it
+                try {
+                    context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1 && cursor.moveToFirst()) {
+                            val fName = cursor.getString(nameIndex)
+                            selectedZipName = fName
+                            if (name.isBlank()) {
+                                name = fName.substringBeforeLast(".").filter { ch -> ch.isLetterOrDigit() || ch == '_' }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
         AlertDialog(
-            onDismissRequest = { showGithubDialog = false },
+            onDismissRequest = { showNewProjectDialog = false },
             containerColor = DarkSurfaceElevated,
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Import from GitHub", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (step == 1) Icons.Default.Code else when (source) {
+                            "GITHUB" -> Icons.Default.CloudDownload
+                            "ZIP" -> Icons.Default.DriveFolderUpload
+                            else -> Icons.Default.Add
+                        },
+                        contentDescription = null,
+                        tint = PrimaryAccent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column {
+                        Text(
+                            text = if (step == 1) "Select Stack (1/2)" else "Configure Project (2/2)",
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            fontSize = 17.sp
+                        )
+                        Text(
+                            text = if (step == 1) "Step 1: Choose project runtime" else "Step 2: Source & unique project name",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Enter repository URL to clone and set up:", color = TextSecondary, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = githubUrlInput,
-                        onValueChange = { githubUrlInput = it },
-                        label = { Text("GitHub Repo URL") },
-                        placeholder = { Text("https://github.com/user/repo", color = TextMuted) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = PrimaryAccent,
-                            unfocusedBorderColor = DarkBorderSubtle,
-                            focusedContainerColor = DarkSurface,
-                            unfocusedContainerColor = DarkSurface
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (step == 1) {
+                        Text("Select Technology Stack / Runtime", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.localhost.core.model.RuntimeType.entries.forEach { runtime ->
+                                val isSelected = selectedRuntime == runtime
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) PrimaryAccentContainer else DarkSurface,
+                                    border = BorderStroke(1.dp, if (isSelected) PrimaryAccent else DarkBorderSubtle),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedRuntime = runtime
+                                            if (!userChangedPort) {
+                                                portStr = runtime.defaultPort.toString()
+                                            }
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isSelected) PrimaryAccent else DarkSurfaceElevated)
+                                                    .border(1.dp, if (isSelected) PrimaryAccent else DarkBorder, CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isSelected) {
+                                                    Icon(Icons.Default.Check, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                            Column {
+                                                Text(
+                                                    text = runtime.displayName,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) PrimaryAccent else TextPrimary
+                                                )
+                                                Text(
+                                                    text = when (runtime) {
+                                                        com.localhost.core.model.RuntimeType.PYTHON -> "Python 3, Flask, FastAPI, Django, pip"
+                                                        com.localhost.core.model.RuntimeType.NODEJS -> "Node.js runtime, npm package server"
+                                                        com.localhost.core.model.RuntimeType.PHP -> "PHP built-in server with Composer"
+                                                        com.localhost.core.model.RuntimeType.JAVA -> "OpenJDK embedded runtime and JARs"
+                                                        com.localhost.core.model.RuntimeType.STATIC -> "HTML5, CSS3, JavaScript web assets"
+                                                    },
+                                                    fontSize = 11.sp,
+                                                    color = TextMuted
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = ":${runtime.defaultPort}",
+                                            fontSize = 12.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = PrimaryAccent
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text("Select Project Source", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(
+                                Triple("EMPTY", "Empty", Icons.Default.Code),
+                                Triple("ZIP", "ZIP File", Icons.Default.DriveFolderUpload),
+                                Triple("GITHUB", "Git / GitHub", Icons.Default.CloudDownload)
+                            ).forEach { (src, label, icon) ->
+                                val isSelected = source == src
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) PrimaryAccentContainer else DarkSurface,
+                                    border = BorderStroke(1.dp, if (isSelected) PrimaryAccent else DarkBorderSubtle),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { source = src }
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            icon,
+                                            contentDescription = null,
+                                            tint = if (isSelected) PrimaryAccent else TextMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            label,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSelected) PrimaryAccent else TextSecondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (source == "GITHUB") {
+                            OutlinedTextField(
+                                value = githubUrl,
+                                onValueChange = {
+                                    githubUrl = it
+                                    if (name.isBlank() && it.contains("/")) {
+                                        val candidate = it.trim().removeSuffix("/").removeSuffix(".git").substringAfterLast("/")
+                                        if (candidate.isNotBlank()) {
+                                            name = candidate.filter { ch -> ch.isLetterOrDigit() || ch == '_' }
+                                        }
+                                    }
+                                },
+                                label = { Text("Git Repository URL", fontSize = 12.sp) },
+                                placeholder = { Text("https://github.com/user/repo", color = TextMuted, fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryAccent,
+                                    unfocusedBorderColor = DarkBorderSubtle,
+                                    focusedContainerColor = DarkSurface,
+                                    unfocusedContainerColor = DarkSurface
+                                )
+                            )
+                        } else if (source == "ZIP") {
+                            Button(
+                                onClick = { newProjectZipLauncher.launch("*/*") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedZipUri != null) PrimaryAccentContainer else DarkSurface
+                                ),
+                                border = BorderStroke(1.dp, if (selectedZipUri != null) PrimaryAccent else DarkBorderSubtle)
+                            ) {
+                                Icon(
+                                    Icons.Default.DriveFolderUpload,
+                                    contentDescription = null,
+                                    tint = if (selectedZipUri != null) PrimaryAccent else TextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = selectedZipName ?: "Choose .zip Archive",
+                                    color = if (selectedZipUri != null) PrimaryAccent else TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        val isDuplicateName = name.isNotBlank() && projects.any { it.name.equals(name.trim(), ignoreCase = true) }
+                        val isInvalidFormat = name.isNotBlank() && !Regex("^[a-zA-Z0-9_]+$").matches(name.trim())
+
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { input ->
+                                name = input.filter { ch -> ch.isLetterOrDigit() || ch == '_' }
+                            },
+                            label = { Text("Project Name (alphanumeric, _)", fontSize = 12.sp) },
+                            placeholder = { Text("e.g. my_project_1", color = TextMuted, fontSize = 12.sp) },
+                            singleLine = true,
+                            isError = isDuplicateName || isInvalidFormat,
+                            supportingText = {
+                                if (isDuplicateName) {
+                                    Text("A project with this name already exists", color = StatusRed, fontSize = 11.sp)
+                                } else if (isInvalidFormat) {
+                                    Text("Only letters, numbers, and underscores (_) are allowed", color = StatusRed, fontSize = 11.sp)
+                                } else {
+                                    Text("Must be unique, alphanumeric and underscores only", color = TextMuted, fontSize = 10.sp)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = PrimaryAccent,
+                                unfocusedBorderColor = DarkBorderSubtle,
+                                focusedContainerColor = DarkSurface,
+                                unfocusedContainerColor = DarkSurface,
+                                errorBorderColor = StatusRed
+                            )
                         )
-                    )
-                    OutlinedTextField(
-                        value = githubCustomName,
-                        onValueChange = { githubCustomName = it },
-                        label = { Text("Project Name (Optional)") },
-                        placeholder = { Text("my-app", color = TextMuted) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = PrimaryAccent,
-                            unfocusedBorderColor = DarkBorderSubtle,
-                            focusedContainerColor = DarkSurface,
-                            unfocusedContainerColor = DarkSurface
+
+                        OutlinedTextField(
+                            value = portStr,
+                            onValueChange = {
+                                portStr = it.filter { ch -> ch.isDigit() }
+                                userChangedPort = true
+                            },
+                            label = { Text("Server Port (1024 - 65535)", fontSize = 12.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = PrimaryAccent,
+                                unfocusedBorderColor = DarkBorderSubtle,
+                                focusedContainerColor = DarkSurface,
+                                unfocusedContainerColor = DarkSurface
+                            )
                         )
-                    )
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = DarkSurface,
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Runtime: ${selectedRuntime.displayName}", color = TextSecondary, fontSize = 12.sp)
+                                TextButton(onClick = { step = 1 }, contentPadding = PaddingValues(0.dp)) {
+                                    Text("Change Stack", color = PrimaryAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (githubUrlInput.isNotBlank()) {
-                            viewModel.importProjectFromGithub(context, githubUrlInput, githubCustomName.takeIf { it.isNotBlank() })
-                            showGithubDialog = false
-                            githubUrlInput = ""
-                            githubCustomName = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Import", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                if (step == 1) {
+                    Button(
+                        onClick = {
+                            if (!userChangedPort) {
+                                portStr = selectedRuntime.defaultPort.toString()
+                            }
+                            step = 2
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Next", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            val trimmedName = name.trim()
+                            if (trimmedName.isBlank()) {
+                                Toast.makeText(context, "Project name cannot be empty", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (!Regex("^[a-zA-Z0-9_]+$").matches(trimmedName)) {
+                                Toast.makeText(context, "Only alphanumeric characters and _ allowed", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (projects.any { it.name.equals(trimmedName, ignoreCase = true) }) {
+                                Toast.makeText(context, "Project name '$trimmedName' already exists", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val p = portStr.toIntOrNull() ?: selectedRuntime.defaultPort
+                            if (p !in 1024..65535) {
+                                Toast.makeText(context, "Port must be between 1024 and 65535", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            when (source) {
+                                "EMPTY" -> {
+                                    val created = viewModel.createProject(trimmedName, selectedRuntime, p, context.filesDir)
+                                    if (created) {
+                                        showNewProjectDialog = false
+                                        Toast.makeText(context, "Created project '$trimmedName'", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                "ZIP" -> {
+                                    if (selectedZipUri == null) {
+                                        Toast.makeText(context, "Please choose a ZIP file", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    viewModel.importProjectZip(context, selectedZipUri!!, customName = trimmedName, customPort = p, customRuntime = selectedRuntime)
+                                    showNewProjectDialog = false
+                                }
+                                "GITHUB" -> {
+                                    if (githubUrl.isBlank()) {
+                                        Toast.makeText(context, "Please enter a Git repository URL", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    viewModel.importProjectFromGithub(context, githubUrl, customName = trimmedName, customPort = p, customRuntime = selectedRuntime)
+                                    showNewProjectDialog = false
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            if (source == "EMPTY") "Create Project" else "Import Project",
+                            color = TextOnAccent,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showGithubDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
+                if (step == 1) {
+                    TextButton(onClick = { showNewProjectDialog = false }) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                } else {
+                    TextButton(onClick = { step = 1 }) {
+                        Text("Back", color = TextSecondary)
+                    }
                 }
             }
         )

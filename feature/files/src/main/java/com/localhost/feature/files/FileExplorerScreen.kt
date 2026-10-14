@@ -1,12 +1,29 @@
 package com.localhost.feature.files
 
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.ScrollState
+
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.text.style.TextOverflow
+
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
+
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.WebView
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -69,6 +86,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -204,16 +222,22 @@ fun FileExplorerScreen(
     val currentProject = projects.find { it.id == selectedId }
     val context = LocalContext.current
 
+    
+    val deviceFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.importFileFromDevice(context, it) }
+    }
+    val fileListState = rememberLazyListState()
+
     val zipPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { viewModel.importZip(context, it) }
     }
 
-    BackHandler {
-        if (editingFile != null) {
-            viewModel.closeEditor()
-        } else if (showVcsSheet) {
+    BackHandler(enabled = editingFile == null) {
+        if (showVcsSheet) {
             showVcsSheet = false
         } else if (showCreateDialog) {
             showCreateDialog = false
@@ -233,26 +257,10 @@ fun FileExplorerScreen(
         }
     }
 
-    if (!isLandscape && editingFile != null) {
-        FileEditorAndViewerScreen(
-            file = editingFile!!,
-            fileType = editingFileType,
-            content = fileContent,
-            imageBitmap = imageBitmap,
-            pdfPageBitmap = pdfPageBitmap,
-            pdfPageCount = pdfPageCount,
-            currentPdfPage = currentPdfPage,
-            onClose = { viewModel.closeEditor() },
-            onSave = { viewModel.saveContent(it) },
-            onExtractArchive = { viewModel.extractArchiveFile(editingFile!!); viewModel.closeEditor() },
-            onNextPdfPage = { viewModel.nextPdfPage() },
-            onPrevPdfPage = { viewModel.previousPdfPage() }
-        )
-        return
-    }
 
-    Scaffold(
-        containerColor = DarkBackground,
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = DarkBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -399,15 +407,31 @@ fun FileExplorerScreen(
 
                         FileListContent(
                             files = files,
+                            listState = fileListState,
                             onFileClick = { f ->
                                 if (f.isDirectory) viewModel.navigateTo(f.file)
                                 else viewModel.openFile(f.file)
+                            },
+                            onRenameClick = { f ->
+                                renamingFile = f.file
+                                renameInput = f.name
+                            },
+                            onDetailsClick = { f ->
+                                detailsFile = f.file
+                            },
+                            onShareClick = { f ->
+                                viewModel.shareFile(context, f.file)
                             },
                             onCutClick = { f -> viewModel.cutFile(f.file) },
                             onCopyClick = { f -> viewModel.copyFile(f.file) },
                             onDownloadClick = { f -> viewModel.downloadItem(context, f.file) },
                             onDeleteClick = { f -> fileToDelete = f },
-                            onExtractClick = { f -> viewModel.extractArchiveFile(f.file) }
+                            onExtractClick = { f -> viewModel.extractArchiveFile(f.file) },
+                            clipboard = clipboard,
+                            onPasteClick = { target ->
+                                if (target.isDirectory) viewModel.pasteToDir(target.file)
+                                else viewModel.pasteToCurrentDir()
+                            }
                         )
                     }
                 }
@@ -496,11 +520,26 @@ fun FileExplorerScreen(
                             if (f.isDirectory) viewModel.navigateTo(f.file)
                             else viewModel.openFile(f.file)
                         },
+                        onRenameClick = { f ->
+                            renamingFile = f.file
+                            renameInput = f.name
+                        },
+                        onDetailsClick = { f ->
+                            detailsFile = f.file
+                        },
+                        onShareClick = { f ->
+                            viewModel.shareFile(context, f.file)
+                        },
                         onCutClick = { f -> viewModel.cutFile(f.file) },
                         onCopyClick = { f -> viewModel.copyFile(f.file) },
                         onDownloadClick = { f -> viewModel.downloadItem(context, f.file) },
                         onDeleteClick = { f -> fileToDelete = f },
-                        onExtractClick = { f -> viewModel.extractArchiveFile(f.file) }
+                        onExtractClick = { f -> viewModel.extractArchiveFile(f.file) },
+                        clipboard = clipboard,
+                        onPasteClick = { target ->
+                            if (target.isDirectory) viewModel.pasteToDir(target.file)
+                            else viewModel.pasteToCurrentDir()
+                        }
                     )
                 } else {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -508,6 +547,24 @@ fun FileExplorerScreen(
                     }
                 }
             }
+        }
+        }
+
+        if (!isLandscape && editingFile != null) {
+            FileEditorAndViewerScreen(
+                file = editingFile!!,
+                fileType = editingFileType,
+                content = fileContent,
+                imageBitmap = imageBitmap,
+                pdfPageBitmap = pdfPageBitmap,
+                pdfPageCount = pdfPageCount,
+                currentPdfPage = currentPdfPage,
+                onClose = { viewModel.closeEditor() },
+                onSave = { viewModel.saveContent(it) },
+                onExtractArchive = { viewModel.extractArchiveFile(editingFile!!); viewModel.closeEditor() },
+                onNextPdfPage = { viewModel.nextPdfPage() },
+                onPrevPdfPage = { viewModel.previousPdfPage() }
+            )
         }
     }
 
@@ -552,6 +609,99 @@ fun FileExplorerScreen(
             dismissButton = {
                 TextButton(onClick = { showCreateDialog = false }) {
                     Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    
+    renamingFile?.let { file ->
+        AlertDialog(
+            onDismissRequest = { renamingFile = null },
+            containerColor = DarkSurfaceElevated,
+            title = { Text("Rename '${file.name}'", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text = {
+                OutlinedTextField(
+                    value = renameInput,
+                    onValueChange = { renameInput = it },
+                    placeholder = { Text("New name", color = TextMuted) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryAccent,
+                        unfocusedBorderColor = DarkBorderSubtle,
+                        cursorColor = PrimaryAccent,
+                        focusedContainerColor = DarkSurface,
+                        unfocusedContainerColor = DarkSurface
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (renameInput.isNotBlank()) {
+                            viewModel.renameFile(file, renameInput.trim())
+                            renamingFile = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                ) {
+                    Text("Rename", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingFile = null }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    detailsFile?.let { file ->
+        val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
+        AlertDialog(
+            onDismissRequest = { detailsFile = null },
+            containerColor = DarkSurfaceElevated,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("File Details", fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Name", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    Text(file.name, fontSize = 13.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+
+                    Text("Type", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    Text(if (file.isDirectory) "Directory" else file.extension.uppercase().ifEmpty { "File" }, fontSize = 13.sp, color = TextPrimary)
+
+                    Text("Size", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    Text(if (file.isDirectory) "Folder" else "${formatFileSize(file.length())} (${file.length()} bytes)", fontSize = 13.sp, color = TextPrimary)
+
+                    Text("Path", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    Text(file.absolutePath, fontSize = 11.sp, color = TextSecondary, fontFamily = FontFamily.Monospace)
+
+                    Text("Last Modified", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    Text(dateFormat.format(Date(file.lastModified())), fontSize = 13.sp, color = TextPrimary)
+
+                    Text("Permissions", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
+                    val r = if (file.canRead()) "r" else "-"
+                    val w = if (file.canWrite()) "w" else "-"
+                    val x = if (file.canExecute()) "x" else "-"
+                    Text("$r$w$x", fontSize = 12.sp, color = StatusGreen, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { detailsFile = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                ) {
+                    Text("Close", color = TextOnAccent)
                 }
             }
         )
@@ -1077,14 +1227,18 @@ private fun ClipboardStatusBar(
 @OptIn(ExperimentalFoundationApi::class)
 private fun FileListContent(
     files: List<UiFile>,
+    listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     onFileClick: (UiFile) -> Unit,
     onRenameClick: (UiFile) -> Unit = {},
     onDetailsClick: (UiFile) -> Unit = {},
+    onShareClick: (UiFile) -> Unit = {},
     onCutClick: (UiFile) -> Unit,
     onCopyClick: (UiFile) -> Unit,
     onDownloadClick: (UiFile) -> Unit,
     onDeleteClick: (UiFile) -> Unit,
-    onExtractClick: (UiFile) -> Unit
+    onExtractClick: (UiFile) -> Unit,
+    clipboard: FileClipboard? = null,
+    onPasteClick: (UiFile) -> Unit = {}
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
 
@@ -1103,6 +1257,7 @@ private fun FileListContent(
         }
     } else {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 12.dp),
@@ -1177,27 +1332,11 @@ private fun FileListContent(
                                     modifier = Modifier.background(DarkSurfaceElevated)
                                 ) {
                                     DropdownMenuItem(
-                                        text = { Text("Rename", color = TextPrimary) },
-                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        text = { Text("Copy", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
                                         onClick = {
                                             menuExpanded = false
-                                            onRenameClick(fileItem)
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Details", color = TextPrimary) },
-                                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
-                                        onClick = {
-                                            menuExpanded = false
-                                            onDetailsClick(fileItem)
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(if (fileItem.isDirectory) "Download (Zip)" else "Download", color = TextPrimary) },
-                                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
-                                        onClick = {
-                                            menuExpanded = false
-                                            onDownloadClick(fileItem)
+                                            onCopyClick(fileItem)
                                         }
                                     )
                                     DropdownMenuItem(
@@ -1208,20 +1347,38 @@ private fun FileListContent(
                                             onCutClick(fileItem)
                                         }
                                     )
+                                    if (clipboard != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("Paste", color = PrimaryAccent, fontWeight = FontWeight.Bold) },
+                                            leadingIcon = { Icon(Icons.Default.ContentPaste, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                menuExpanded = false
+                                                onPasteClick(fileItem)
+                                            }
+                                        )
+                                    }
                                     DropdownMenuItem(
-                                        text = { Text("Copy", color = TextPrimary) },
-                                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(18.dp)) },
+                                        text = { Text("Rename", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
                                         onClick = {
                                             menuExpanded = false
-                                            onCopyClick(fileItem)
+                                            onRenameClick(fileItem)
                                         }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text(if (fileItem.isDirectory) "Download (Zip)" else "Download", color = TextPrimary) },
-                                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        text = { Text(if (fileItem.isDirectory) "Share (ZIP)" else "Share", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
                                         onClick = {
                                             menuExpanded = false
-                                            onDownloadClick(fileItem)
+                                            onShareClick(fileItem)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Details", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onDetailsClick(fileItem)
                                         }
                                     )
                                     if (fileItem.fileType == FileType.ARCHIVE) {
@@ -1274,27 +1431,89 @@ fun FileEditorAndViewerScreen(
     val haptics = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val editorSnackbarHostState = remember { SnackbarHostState() }
+    var showUnsavedDialog by remember { mutableStateOf(false) }
+
+    val syntaxIssues = remember(textInput, file.extension) {
+        if (fileType == FileType.TEXT) SyntaxValidator.validate(textInput, file.extension) else emptyList()
+    }
+
+    val attemptClose = {
+        if (fileType == FileType.TEXT && textInput != content) {
+            showUnsavedDialog = true
+        } else {
+            onClose()
+        }
+    }
+
+    BackHandler {
+        attemptClose()
+    }
 
     Scaffold(
         containerColor = CodeBackground,
         snackbarHost = { SnackbarHost(editorSnackbarHostState) },
         topBar = {
-            Surface(color = DarkSurface, border = BorderStroke(1.dp, DarkBorderSubtle)) {
-                Row(
+            Surface(
+                color = DarkSurface,
+                border = BorderStroke(1.dp, DarkBorderSubtle),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .statusBarsPadding()
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                        IconButton(onClick = { attemptClose() }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close", tint = TextPrimary)
                         }
                         Spacer(modifier = Modifier.width(6.dp))
-                        Column {
-                            Text(file.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-                            Text("${fileType.name} - ${formatFileSize(file.length())}", fontSize = 11.sp, color = TextMuted)
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(file.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (fileType == FileType.TEXT && textInput.isNotBlank()) {
+                                    if (syntaxIssues.isEmpty()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = StatusGreen.copy(alpha = 0.15f),
+                                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.4f))
+                                        ) {
+                                            Text(
+                                                text = "✓ Valid",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = StatusGreen,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    } else {
+                                        val first = syntaxIssues.first()
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = StatusRed.copy(alpha = 0.15f),
+                                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f))
+                                        ) {
+                                            Text(
+                                                text = "⚠ L${first.line}: ${first.message}",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = StatusRed,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Text("${fileType.name} • ${formatFileSize(file.length())}${if (textInput != content && fileType == FileType.TEXT) " • Modified" else ""}", fontSize = 11.sp, color = if (textInput != content && fileType == FileType.TEXT) StatusYellow else TextMuted)
                         }
                     }
 
@@ -1345,13 +1564,55 @@ fun FileEditorAndViewerScreen(
                         }
                     }
                 }
+
+                if (fileType == FileType.TEXT && syntaxIssues.isNotEmpty()) {
+                    Surface(
+                        color = StatusRed.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = StatusRed,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                syntaxIssues.take(2).forEach { issue ->
+                                    Text(
+                                        text = "Line ${issue.line}: ${issue.message}",
+                                        color = StatusRed,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .navigationBarsPadding()
+                .imePadding()
         ) {
             when (fileType) {
                 FileType.TEXT -> {
@@ -1396,7 +1657,42 @@ fun FileEditorAndViewerScreen(
             }
         }
     }
+
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            containerColor = DarkSurfaceElevated,
+            title = { Text("Changes Detected", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text = { Text("You have unsaved changes in '${file.name}'. Would you like to save before leaving?", color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onSave(textInput)
+                        showUnsavedDialog = false
+                        onClose()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                ) {
+                    Text("Save & Exit", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        showUnsavedDialog = false
+                        onClose()
+                    }) {
+                        Text("Discard", color = StatusRed)
+                    }
+                    TextButton(onClick = { showUnsavedDialog = false }) {
+                        Text("Cancel", color = TextMuted)
+                    }
+                }
+            }
+        )
+    }
 }
+
 
 @Composable
 private fun MarkdownPreviewView(content: String) {
@@ -1503,9 +1799,21 @@ private fun CodeTextEditor(
 ) {
     val lines = remember(text) { text.lines().size.coerceAtLeast(1) }
     val lineNumbersText = remember(lines) { (1..lines).joinToString("\n") }
-    val verticalScrollState = rememberScrollState()
-    val horizontalScrollState = rememberScrollState()
+    val verticalScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val horizontalScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
     val syntaxHighlighter = remember(fileExtension) { SyntaxHighlighter(fileExtension) }
+
+    var textFieldValue by remember {
+        mutableStateOf(TextFieldValue(text = text, selection = TextRange(text.length)))
+    }
+
+    var isUserTyping by remember { mutableStateOf(false) }
+
+    LaunchedEffect(text) {
+        if (!isUserTyping && textFieldValue.text != text) {
+            textFieldValue = textFieldValue.copy(text = text)
+        }
+    }
 
     val tokens = remember(text) { SyntaxHighlighter.extractTokens(text) }
     var currentWord by remember { mutableStateOf("") }
@@ -1536,9 +1844,10 @@ private fun CodeTextEditor(
                         color = PrimaryAccentContainer,
                         shape = RoundedCornerShape(6.dp),
                         modifier = Modifier.clickable {
-                            val lastIdx = text.lastIndexOf(currentWord)
+                            val lastIdx = textFieldValue.text.lastIndexOf(currentWord)
                             if (lastIdx != -1) {
-                                val newText = text.substring(0, lastIdx) + suggestion + text.substring(lastIdx + currentWord.length)
+                                val newText = textFieldValue.text.substring(0, lastIdx) + suggestion + textFieldValue.text.substring(lastIdx + currentWord.length)
+                                textFieldValue = TextFieldValue(text = newText, selection = TextRange(lastIdx + suggestion.length))
                                 onTextChange(newText)
                                 currentWord = ""
                             }
@@ -1577,11 +1886,16 @@ private fun CodeTextEditor(
             )
 
             BasicTextField(
-                value = text,
-                onValueChange = { newText ->
-                    onTextChange(newText)
-                    val lastWord = newText.takeLastWhile { it.isLetterOrDigit() || it == '_' }
-                    currentWord = lastWord
+                value = textFieldValue,
+                onValueChange = { tfv ->
+                    isUserTyping = true
+                    textFieldValue = tfv
+                    if (tfv.text != text) {
+                        onTextChange(tfv.text)
+                        val lastWord = tfv.text.takeLastWhile { it.isLetterOrDigit() || it == '_' }
+                        currentWord = lastWord
+                    }
+                    isUserTyping = false
                 },
                 visualTransformation = syntaxHighlighter,
                 textStyle = TextStyle(

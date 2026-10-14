@@ -208,11 +208,11 @@ fun CreateProjectScreen(
             OutlinedTextField(
                 value = name,
                 onValueChange = {
-                    name = it.replace(" ", "-").lowercase()
+                    name = it.filter { ch -> ch.isLetterOrDigit() || ch == '_' }
                     errorMessage = null
                 },
                 label = { Text("Project Name") },
-                placeholder = { Text("e.g. my-flask-api", color = TextMuted) },
+                placeholder = { Text("e.g. my_project_1", color = TextMuted) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
@@ -330,15 +330,24 @@ fun CreateProjectScreen(
             Button(
                 onClick = {
                     val port = portText.toIntOrNull()
-                    if (name.isBlank()) {
+                    val trimmedName = name.trim()
+                    if (trimmedName.isBlank()) {
                         errorMessage = "Please enter a project name"
+                        return@Button
+                    }
+                    if (!Regex("^[a-zA-Z0-9_]+$").matches(trimmedName)) {
+                        errorMessage = "Only alphanumeric characters and underscores allowed"
+                        return@Button
+                    }
+                    if (viewModel.projects.value.any { it.name.equals(trimmedName, ignoreCase = true) }) {
+                        errorMessage = "A project named '$trimmedName' already exists"
                         return@Button
                     }
                     if (port == null || port !in 1024..65535) {
                         errorMessage = "Port must be a number between 1024 and 65535"
                         return@Button
                     }
-                    val created = viewModel.createProject(name, selectedRuntime, port, context.filesDir)
+                    val created = viewModel.createProject(trimmedName, selectedRuntime, port, context.filesDir)
                     if (created) {
                         onProjectCreated()
                     } else {

@@ -226,24 +226,106 @@ updateClock();
                 defaultStartupCommand = "python3 app.py",
                 defaultFiles = mapOf(
                     "app.py" to """
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 import os
 
 app = Flask(__name__)
 port = int(os.environ.get("PORT", {{PORT}}))
 
+HTML = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{PROJECT_NAME}} - Python Flask</title>
+    <style>
+        :root {
+            --bg: #0c0e14;
+            --surface: #141720;
+            --surface-elevated: #1b1f2c;
+            --border: #252a3a;
+            --primary: #3b82f6;
+            --success: #10b981;
+            --text: #f3f4f8;
+            --text-muted: #646e85;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.25rem;
+        }
+        .card {
+            max-width: 520px;
+            width: 100%;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.4);
+        }
+        @media (max-width: 480px) { .card { padding: 1.5rem 1.25rem; } }
+        h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem; }
+        .badge {
+            display: inline-block;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 1.25rem;
+        }
+        .desc {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--primary);
+            border-radius: 10px;
+            padding: 1rem;
+            font-size: 0.92rem;
+            line-height: 1.5;
+            margin-bottom: 1.25rem;
+        }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.25rem; }
+        @media (max-width: 440px) { .grid { grid-template-columns: 1fr; } }
+        .box { background: var(--surface-elevated); padding: 0.8rem 1rem; border-radius: 10px; border: 1px solid var(--border); }
+        .label { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem; }
+        .val { font-family: monospace; font-size: 0.9rem; font-weight: 600; }
+        .btn { display: block; width: 100%; padding: 0.8rem; background: var(--primary); color: #fff; font-weight: 600; font-size: 0.9rem; border: none; border-radius: 10px; text-align: center; text-decoration: none; }
+        .footer { margin-top: 1.25rem; text-align: center; font-size: 0.75rem; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>{{PROJECT_NAME}}</h1>
+        <div class="badge">Python Flask - Online</div>
+        <div class="desc">Your Python Flask service is running and serving requests directly on Android via Localhost.</div>
+        <div class="grid">
+            <div class="box"><div class="label">Runtime</div><div class="val">Python / Flask</div></div>
+            <div class="box"><div class="label">Port</div><div class="val">:{{PORT}}</div></div>
+            <div class="box"><div class="label">Host</div><div class="val">0.0.0.0</div></div>
+            <div class="box"><div class="label">Status</div><div class="val" style="color:var(--success);">Online</div></div>
+        </div>
+        <a class="btn" href="/api/ping">Test API Endpoint (/api/ping)</a>
+        <div class="footer">Localhost Mobile VPS - Android Protected Host</div>
+    </div>
+</body>
+</html>'''
+
 @app.route("/")
 def home():
-    return jsonify({
-        "status": "online",
-        "message": "Hello from {{PROJECT_NAME}} on Android!",
-        "server": "Flask (Python)",
-        "port": port
-    })
+    return HTML
 
 @app.route("/api/ping", methods=["GET"])
 def ping():
-    return jsonify({"pong": True})
+    return jsonify({"status": "online", "runtime": "Python", "framework": "Flask", "port": port})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=port)
@@ -263,18 +345,99 @@ const express = require('express');
 const app = express();
 const port = process.env.PORT || {{PORT}};
 
-app.use(express.json());
+const HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{PROJECT_NAME}} - Node.js Express</title>
+    <style>
+        :root {
+            --bg: #0c0e14;
+            --surface: #141720;
+            --surface-elevated: #1b1f2c;
+            --border: #252a3a;
+            --primary: #22c55e;
+            --success: #10b981;
+            --text: #f3f4f8;
+            --text-muted: #646e85;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.25rem;
+        }
+        .card {
+            max-width: 520px;
+            width: 100%;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.4);
+        }
+        @media (max-width: 480px) { .card { padding: 1.5rem 1.25rem; } }
+        h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem; }
+        .badge {
+            display: inline-block;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 1.25rem;
+        }
+        .desc {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--primary);
+            border-radius: 10px;
+            padding: 1rem;
+            font-size: 0.92rem;
+            line-height: 1.5;
+            margin-bottom: 1.25rem;
+        }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.25rem; }
+        @media (max-width: 440px) { .grid { grid-template-columns: 1fr; } }
+        .box { background: var(--surface-elevated); padding: 0.8rem 1rem; border-radius: 10px; border: 1px solid var(--border); }
+        .label { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem; }
+        .val { font-family: monospace; font-size: 0.9rem; font-weight: 600; }
+        .btn { display: block; width: 100%; padding: 0.8rem; background: var(--primary); color: #fff; font-weight: 600; font-size: 0.9rem; border: none; border-radius: 10px; text-align: center; text-decoration: none; }
+        .footer { margin-top: 1.25rem; text-align: center; font-size: 0.75rem; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>{{PROJECT_NAME}}</h1>
+        <div class="badge">Node.js Express - Online</div>
+        <div class="desc">Your Node.js Express server is running and serving traffic directly on Android via Localhost.</div>
+        <div class="grid">
+            <div class="box"><div class="label">Runtime</div><div class="val">Node.js / Express</div></div>
+            <div class="box"><div class="label">Port</div><div class="val">:${'$'}{port}</div></div>
+            <div class="box"><div class="label">Host</div><div class="val">0.0.0.0</div></div>
+            <div class="box"><div class="label">Status</div><div class="val" style="color:var(--success);">Online</div></div>
+        </div>
+        <a class="btn" href="/api/health">Test Health Endpoint (/api/health)</a>
+        <div class="footer">Localhost Mobile VPS - Android Protected Host</div>
+    </div>
+</body>
+</html>`;
 
 app.get('/', (req, res) => {
-    res.json({
-        status: 'online',
-        message: 'Hello from {{PROJECT_NAME}} on Android!',
-        port: port
-    });
+    res.send(HTML);
 });
 
 app.get('/api/health', (req, res) => {
-    res.json({ uptime: process.uptime(), timestamp: Date.now() });
+    res.json({ status: 'online', uptime: process.uptime(), runtime: 'Node.js', framework: 'Express', port: port });
 });
 
 app.listen(port, '0.0.0.0', () => {
@@ -407,7 +570,79 @@ app.listen(port, '0.0.0.0', () => {
                 description = "Built-in lightweight Java server executing executable JARs.",
                 defaultStartupCommand = "java -jar app.jar",
                 defaultFiles = mapOf(
-                    "README.md" to "# {{PROJECT_NAME}}\nPlace your executable JAR file named `app.jar` in this directory to serve requests on port {{PORT}}."
+                    "App.java" to """
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+
+public class App {
+    public static void main(String[] args) throws IOException {
+        int port = {{PORT}};
+        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+
+        final String html = "<!DOCTYPE html>\n" +
+            "<html lang=\"en\">\n" +
+            "<head>\n" +
+            "    <meta charset=\"UTF-8\">\n" +
+            "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
+            "    <title>{{PROJECT_NAME}} - Java Server</title>\n" +
+            "    <style>\n" +
+            "        :root { --bg: #0c0e14; --surface: #141720; --surface-elevated: #1b1f2c; --border: #252a3a; --primary: #f59e0b; --success: #10b981; --text: #f3f4f8; --text-muted: #646e85; }\n" +
+            "        * { box-sizing: border-box; margin: 0; padding: 0; }\n" +
+            "        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 1.25rem; }\n" +
+            "        .card { max-width: 520px; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; box-shadow: 0 16px 40px rgba(0,0,0,0.4); }\n" +
+            "        @media (max-width: 480px) { .card { padding: 1.5rem 1.25rem; } }\n" +
+            "        h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem; }\n" +
+            "        .badge { display: inline-block; background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; margin-bottom: 1.25rem; }\n" +
+            "        .desc { background: var(--surface-elevated); border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: 10px; padding: 1rem; font-size: 0.92rem; line-height: 1.5; margin-bottom: 1.25rem; }\n" +
+            "        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.25rem; }\n" +
+            "        @media (max-width: 440px) { .grid { grid-template-columns: 1fr; } }\n" +
+            "        .box { background: var(--surface-elevated); padding: 0.8rem 1rem; border-radius: 10px; border: 1px solid var(--border); }\n" +
+            "        .label { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem; }\n" +
+            "        .val { font-family: monospace; font-size: 0.9rem; font-weight: 600; }\n" +
+            "        .btn { display: block; width: 100%; padding: 0.8rem; background: var(--primary); color: #000; font-weight: 700; font-size: 0.9rem; border: none; border-radius: 10px; text-align: center; text-decoration: none; cursor: pointer; }\n" +
+            "        .footer { margin-top: 1.25rem; text-align: center; font-size: 0.75rem; color: var(--text-muted); }\n" +
+            "    </style>\n" +
+            "</head>\n" +
+            "<body>\n" +
+            "    <div class=\"card\">\n" +
+            "        <h1>{{PROJECT_NAME}}</h1>\n" +
+            "        <div class=\"badge\">Java Server - Online</div>\n" +
+            "        <div class=\"desc\">Your Java HTTP server is active and serving requests directly on Android.</div>\n" +
+            "        <div class=\"grid\">\n" +
+            "            <div class=\"box\"><div class=\"label\">Runtime</div><div class=\"val\">Java " + System.getProperty("java.version") + "</div></div>\n" +
+            "            <div class=\"box\"><div class=\"label\">Port</div><div class=\"val\">:" + port + "</div></div>\n" +
+            "            <div class=\"box\"><div class=\"label\">Host</div><div class=\"val\">0.0.0.0</div></div>\n" +
+            "            <div class=\"box\"><div class=\"label\">Status</div><div class=\"val\" style=\"color:var(--success);\">Online</div></div>\n" +
+            "        </div>\n" +
+            "        <button class=\"btn\" onclick=\"window.location.reload()\">Reload Application</button>\n" +
+            "        <div class=\"footer\">Localhost Mobile VPS - Android Protected Host</div>\n" +
+            "    </div>\n" +
+            "</body>\n" +
+            "</html>";
+
+        server.createContext("/", new HttpHandler() {
+            @Override
+            public void handle(HttpExchange exchange) throws IOException {
+                byte[] bytes = html.getBytes("UTF-8");
+                exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+                exchange.sendResponseHeaders(200, bytes.length);
+                OutputStream os = exchange.getResponseBody();
+                os.write(bytes);
+                os.close();
+            }
+        });
+
+        server.setExecutor(null);
+        server.start();
+        System.out.println("Java server started on port " + port);
+    }
+}
+""".trimIndent(),
+                    "README.md" to "# {{PROJECT_NAME}}\nJava HTTP server running on port {{PORT}}.\n\nTo compile and run:\n`javac App.java && java App`\n"
                 )
             )
         )

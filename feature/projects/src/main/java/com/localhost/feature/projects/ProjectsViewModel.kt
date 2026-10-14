@@ -46,6 +46,10 @@ import kotlinx.coroutines.flow.map
 
 data class ProjectTerminalLine(val command: String, val output: String)
 
+object ProjectTerminalCache {
+    val histories = mutableMapOf<String, List<ProjectTerminalLine>>()
+}
+
 @HiltViewModel
 class ProjectsViewModel @Inject constructor(
     private val projectRepository: ProjectRepository,
@@ -75,7 +79,7 @@ class ProjectsViewModel @Inject constructor(
     private val _isInstallingDeps = MutableStateFlow(false)
     val isInstallingDeps = _isInstallingDeps.asStateFlow()
 
-    private val _projectTerminals = MutableStateFlow<Map<String, List<ProjectTerminalLine>>>(emptyMap())
+    private val _projectTerminals = MutableStateFlow<Map<String, List<ProjectTerminalLine>>>(ProjectTerminalCache.histories.toMap())
     val projectTerminals: StateFlow<Map<String, List<ProjectTerminalLine>>> = _projectTerminals.asStateFlow()
 
     private val _projectTerminalRunning = MutableStateFlow<Map<String, Boolean>>(emptyMap())
@@ -107,6 +111,7 @@ class ProjectsViewModel @Inject constructor(
             currentList.add(ProjectTerminalLine(cmd, ""))
             val map = _projectTerminals.value.toMutableMap()
             map[project.id] = currentList
+            ProjectTerminalCache.histories[project.id] = currentList
             _projectTerminals.value = map
 
             val currentOutput = StringBuilder()
@@ -120,6 +125,7 @@ class ProjectsViewModel @Inject constructor(
                         list[targetIndex] = ProjectTerminalLine(cmd, currentOutput.toString())
                         val m = _projectTerminals.value.toMutableMap()
                         m[project.id] = list
+                        ProjectTerminalCache.histories[project.id] = list
                         _projectTerminals.value = m
                     }
                 }
@@ -127,6 +133,7 @@ class ProjectsViewModel @Inject constructor(
                 if (out == "__CLEAR__") {
                     val m = _projectTerminals.value.toMutableMap()
                     m[project.id] = emptyList()
+                    ProjectTerminalCache.histories[project.id] = emptyList()
                     _projectTerminals.value = m
                 } else {
                     val finalOutput = if (currentOutput.isNotEmpty()) currentOutput.toString().trimEnd() else out
@@ -135,6 +142,7 @@ class ProjectsViewModel @Inject constructor(
                         list[targetIndex] = ProjectTerminalLine(cmd, finalOutput)
                         val m = _projectTerminals.value.toMutableMap()
                         m[project.id] = list
+                        ProjectTerminalCache.histories[project.id] = list
                         _projectTerminals.value = m
                     }
                 }
@@ -174,6 +182,7 @@ class ProjectsViewModel @Inject constructor(
     fun clearProjectTerminal(projectId: String) {
         val m = _projectTerminals.value.toMutableMap()
         m[projectId] = emptyList()
+        ProjectTerminalCache.histories[projectId] = emptyList()
         _projectTerminals.value = m
     }
 
@@ -357,7 +366,50 @@ class ProjectsViewModel @Inject constructor(
         }
     }
 
-    suspend fun exportProjectZip(project: Project, context: Context): File? = withContext(Dispatchers.IO) {
+    fun scaffoldPythonVenv(projectDir: File) {
+        try {
+            val venvDir = File(projectDir, ".venv")
+            if (!venvDir.exists()) venvDir.mkdirs()
+            val binDir = File(venvDir, "bin").apply { mkdirs() }
+            File(venvDir, "lib/python3.11/site-packages").apply { mkdirs() }
+            
+            val pyvenvCfg = File(venvDir, "pyvenv.cfg")
+            if (!pyvenvCfg.exists()) {
+                pyvenvCfg.writeText(
+                    "home = /system/bin\n" +
+                    "include-system-site-packages = true\n" +
+                    "version = 3.11.9\n" +
+                    "executable = /system/bin/python3\n" +
+                    "command = python3 -m venv .venv\n"
+                )
+            }
+            
+            val activateFile = File(binDir, "activate")
+            if (!activateFile.exists()) {
+                activateFile.writeText(
+                    "#!/bin/sh\n" +
+                    "VIRTUAL_ENV=\"${venvDir.absolutePath}\"\n" +
+                    "export VIRTUAL_ENV\n" +
+                    "_OLD_VIRTUAL_PATH=\"\$PATH\"\n" +
+                    "PATH=\"\$VIRTUAL_ENV/bin:\$PATH\"\n" +
+                    "export PATH\n"
+                )
+                try { activateFile.setExecutable(true, false) } catch (_: Exception) {}
+            }
+
+            val pyExec = runtimeManager.getExecutablePath(RuntimeType.PYTHON)
+            if (pyExec != null && File(pyExec).exists()) {
+                val env = runtimeManager.getEnvironmentForRuntime(RuntimeType.PYTHON)
+                val pb = ProcessBuilder(pyExec, "-m", "venv", "--system-site-packages", venvDir.absolutePath)
+                pb.directory(projectDir)
+                pb.environment().putAll(env)
+                val proc = pb.start()
+                proc.waitFor()
+            }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun exportProjectZip(project: Project, context: Context, includeDotEnv: Boolean = false): File? = withContext(Dispatchers.IO) {
         val projectDir = File(project.workingDir)
         if (!projectDir.exists()) {
             _message.value = "Project directory not found"
@@ -369,7 +421,7 @@ class ProjectsViewModel @Inject constructor(
         try {
             if (zipFile.exists()) zipFile.delete()
             FileOutputStream(zipFile).use { fos ->
-                FileUtils.zipDirectory(projectDir, fos)
+                FileUtils.zipDirectory(projectDir, fos, includeDotEnv = includeDotEnv)
             }
             _message.value = "Exported ${project.name} to ZIP"
             zipFile
@@ -383,6 +435,8 @@ class ProjectsViewModel @Inject constructor(
         context: Context,
         zipUri: Uri,
         customName: String? = null,
+        customPort: Int? = null,
+        customRuntime: RuntimeType? = null,
         onComplete: ((Boolean) -> Unit)? = null
     ) {
         viewModelScope.launch {
@@ -443,14 +497,26 @@ class ProjectsViewModel @Inject constructor(
                     rootFiles = targetDir.listFiles()
                 }
 
-                val (runtime, startCmd) = detectRuntimeFromDirectory(targetDir)
+                val (detectedRuntime, detectedCmd) = detectRuntimeFromDirectory(targetDir)
+                val runtime = customRuntime ?: detectedRuntime
+                val startCmd = if (customRuntime != null) {
+                    when (customRuntime) {
+                        RuntimeType.PYTHON -> "python3 app.py"
+                        RuntimeType.NODEJS -> "node server.js"
+                        RuntimeType.PHP -> "builtin"
+                        RuntimeType.STATIC -> "builtin"
+                        RuntimeType.JAVA -> "java -jar app.jar"
+                    }
+                } else detectedCmd
                 val id = UUID.randomUUID().toString()
 
                 val allExisting = projectRepository.getAll()
                 val usedPorts = allExisting.map { it.port }.toSet()
-                var port = runtime.defaultPort
-                while (usedPorts.contains(port)) {
-                    port++
+                var port = customPort ?: runtime.defaultPort
+                if (customPort == null) {
+                    while (usedPorts.contains(port)) {
+                        port++
+                    }
                 }
 
                 val project = Project(
@@ -462,6 +528,9 @@ class ProjectsViewModel @Inject constructor(
                     startupCommand = startCmd
                 )
 
+                if (runtime == RuntimeType.PYTHON) {
+                    scaffoldPythonVenv(targetDir)
+                }
                 projectRepository.save(project)
                 _message.value = "Imported '${project.name}' successfully as ${runtime.displayName}"
                 onComplete?.invoke(true)
@@ -523,6 +592,8 @@ class ProjectsViewModel @Inject constructor(
         context: Context,
         repoUrl: String,
         customName: String? = null,
+        customPort: Int? = null,
+        customRuntime: RuntimeType? = null,
         onComplete: ((Boolean) -> Unit)? = null
     ) {
         viewModelScope.launch {
@@ -615,12 +686,28 @@ class ProjectsViewModel @Inject constructor(
                     }
                 }
 
-                val (runtime, startCmd) = detectRuntimeFromDirectory(targetDir)
+                val (detectedRuntime, detectedCmd) = detectRuntimeFromDirectory(targetDir)
+                val runtime = customRuntime ?: detectedRuntime
+                val startCmd = if (customRuntime != null) {
+                    when (customRuntime) {
+                        RuntimeType.PYTHON -> "python3 app.py"
+                        RuntimeType.NODEJS -> "node server.js"
+                        RuntimeType.PHP -> "builtin"
+                        RuntimeType.STATIC -> "builtin"
+                        RuntimeType.JAVA -> "java -jar app.jar"
+                    }
+                } else detectedCmd
                 val allExisting = projectRepository.getAll()
                 val usedPorts = allExisting.map { it.port }.toSet()
-                var port = runtime.defaultPort
-                while (usedPorts.contains(port)) {
-                    port++
+                var port = customPort ?: runtime.defaultPort
+                if (customPort == null) {
+                    while (usedPorts.contains(port)) {
+                        port++
+                    }
+                }
+
+                if (runtime == RuntimeType.PYTHON) {
+                    scaffoldPythonVenv(targetDir)
                 }
 
                 val newProject = Project(
@@ -1119,23 +1206,12 @@ class ProjectsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            projectRepository.save(project)
             if (runtime == RuntimeType.PYTHON) {
                 withContext(Dispatchers.IO) {
-                    val pyExec = runtimeManager.getExecutablePath(RuntimeType.PYTHON)
-                    if (pyExec != null) {
-                        val env = runtimeManager.getEnvironmentForRuntime(RuntimeType.PYTHON)
-                        val venvDir = File(projectDir, ".venv")
-                        try {
-                            val pb = ProcessBuilder(pyExec, "-m", "venv", "--system-site-packages", venvDir.absolutePath)
-                            pb.directory(projectDir)
-                            pb.environment().putAll(env)
-                            val proc = pb.start()
-                            proc.waitFor()
-                        } catch (_: Exception) {}
-                    }
+                    scaffoldPythonVenv(projectDir)
                 }
             }
-            projectRepository.save(project)
         }
         return true
     }
@@ -1212,6 +1288,16 @@ class ProjectsViewModel @Inject constructor(
         }
     }
 
+    fun getVpnBlockedMessage(projectId: String): kotlinx.coroutines.flow.Flow<String> =
+        settingsRepository.getVpnBlockedMessage(projectId)
+
+    fun setVpnBlockedMessage(projectId: String, message: String) {
+        viewModelScope.launch {
+            settingsRepository.setVpnBlockedMessage(projectId, message)
+            _message.value = "VPN error message saved"
+        }
+    }
+
     fun clearMessage() {
         _message.value = null
     }
@@ -1242,4 +1328,131 @@ class ProjectsViewModel @Inject constructor(
             )
         }
     }
+
+    fun regenerateVenv(project: Project) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _message.value = "Regenerating clean .venv for ${project.name}..."
+            val workDir = File(project.workingDir)
+            val venvDir = File(workDir, ".venv")
+            try {
+                if (venvDir.exists()) {
+                    venvDir.deleteRecursively()
+                }
+                val pyExec = runtimeManager.getExecutablePath(com.localhost.core.model.RuntimeType.PYTHON)
+                if (pyExec != null) {
+                    val env = runtimeManager.getEnvironmentForRuntime(com.localhost.core.model.RuntimeType.PYTHON)
+                    val pb = ProcessBuilder(pyExec, "-m", "venv", "--system-site-packages", venvDir.absolutePath)
+                    pb.directory(workDir)
+                    pb.environment().putAll(env)
+                    val proc = pb.start()
+                    val exit = proc.waitFor()
+                    if (exit == 0) {
+                        _message.value = "Fresh .venv virtual environment created successfully"
+                    } else {
+                        _message.value = "Failed to regenerate .venv (exit $exit)"
+                    }
+                } else {
+                    _message.value = "Python runtime not found"
+                }
+            } catch (e: Exception) {
+                _message.value = "Error regenerating .venv: ${e.message}"
+            }
+        }
+    }
+
+    fun freezeRequirements(project: Project, fileName: String = "requirements.txt") {
+        viewModelScope.launch(Dispatchers.IO) {
+            _message.value = "Freezing requirements into $fileName..."
+            val workDir = File(project.workingDir)
+            val venvPip = File(workDir, ".venv/bin/pip")
+            val pyPip = if (venvPip.exists()) venvPip.absolutePath else (runtimeManager.getExecutablePath(com.localhost.core.model.RuntimeType.PYTHON)?.let { File(File(it).parentFile, "pip").absolutePath } ?: "pip")
+            try {
+                val env = runtimeManager.getEnvironmentForRuntime(com.localhost.core.model.RuntimeType.PYTHON)
+                val pb = ProcessBuilder(pyPip, "freeze")
+                pb.directory(workDir)
+                pb.environment().putAll(env)
+                val proc = pb.start()
+                val output = proc.inputStream.bufferedReader().readText()
+                proc.waitFor()
+                val targetFile = File(workDir, fileName)
+                targetFile.writeText(output, Charsets.UTF_8)
+                _message.value = "Saved ${output.lines().filter { it.isNotBlank() }.size} packages to $fileName"
+            } catch (e: Exception) {
+                _message.value = "Failed to freeze requirements: ${e.message}"
+            }
+        }
+    }
+
+    fun loadDotEnv(project: Project): Map<String, String> {
+        val envFile = File(project.workingDir, ".env")
+        if (!envFile.exists()) return emptyMap()
+        val result = mutableMapOf<String, String>()
+        try {
+            envFile.readLines().forEach { raw ->
+                val line = raw.trim()
+                if (line.isNotEmpty() && !line.startsWith("#") && line.contains("=")) {
+                    val k = line.substringBefore("=").trim()
+                    val v = line.substringAfter("=").trim().removeSurrounding("\"").removeSurrounding("'")
+                    if (k.isNotEmpty()) result[k] = v
+                }
+            }
+        } catch (_: Exception) {}
+        return result
+    }
+
+    fun saveDotEnv(project: Project, envMap: Map<String, String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val envFile = File(project.workingDir, ".env")
+            try {
+                val sb = StringBuilder()
+                sb.append("# Environment Variables for ").append(project.name).append("\n")
+                envMap.forEach { (k, v) ->
+                    sb.append(k).append("=").append(v).append("\n")
+                }
+                envFile.writeText(sb.toString(), Charsets.UTF_8)
+                _message.value = "Saved .env file (${envMap.size} variables)"
+            } catch (e: Exception) {
+                _message.value = "Failed to save .env: ${e.message}"
+            }
+        }
+    }
+
+    fun syncProjectsFromFilesystem(filesDir: File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val projectsDir = File(filesDir, "projects")
+            if (!projectsDir.exists() || !projectsDir.isDirectory) return@launch
+            val folders = projectsDir.listFiles { f -> f.isDirectory } ?: return@launch
+            val existing: List<com.localhost.core.model.Project> = projectRepository.getAll()
+            val existingPaths = existing.map { File(it.workingDir).canonicalPath }.toSet()
+
+            folders.forEach { folder ->
+                if (!existingPaths.contains(folder.canonicalPath)) {
+                    val name = folder.name
+                    val runtime = when {
+                        File(folder, "app.py").exists() || File(folder, "main.py").exists() || File(folder, "requirements.txt").exists() -> com.localhost.core.model.RuntimeType.PYTHON
+                        File(folder, "package.json").exists() || File(folder, "server.js").exists() -> com.localhost.core.model.RuntimeType.NODEJS
+                        File(folder, "index.php").exists() || File(folder, "composer.json").exists() -> com.localhost.core.model.RuntimeType.PHP
+                        File(folder, "pom.xml").exists() || File(folder, "build.gradle").exists() -> com.localhost.core.model.RuntimeType.JAVA
+                        else -> com.localhost.core.model.RuntimeType.STATIC
+                    }
+                    val newProj = Project(
+                        id = UUID.randomUUID().toString(),
+                        name = name,
+                        runtime = runtime,
+                        port = runtime.defaultPort,
+                        workingDir = folder.absolutePath,
+                        startupCommand = when (runtime) {
+                            com.localhost.core.model.RuntimeType.PYTHON -> "python3 app.py"
+                            com.localhost.core.model.RuntimeType.NODEJS -> "node server.js"
+                            com.localhost.core.model.RuntimeType.PHP -> "builtin"
+                            com.localhost.core.model.RuntimeType.STATIC -> "builtin"
+                            com.localhost.core.model.RuntimeType.JAVA -> "java -jar app.jar"
+                        }
+                    )
+                    projectRepository.save(newProj)
+                }
+            }
+        }
+    }
+
 }

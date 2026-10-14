@@ -2,6 +2,9 @@ package com.localhost.feature.files
 
 import kotlinx.coroutines.flow.update
 import android.content.Context
+import android.content.Intent
+import androidx.core.content.FileProvider
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
@@ -190,6 +193,36 @@ class FilesViewModel @Inject constructor(
 
     fun clearClipboard() {
         _clipboard.value = null
+    }
+
+    fun pasteToDir(targetDir: File) {
+        val clip = _clipboard.value ?: return
+        val sourceFile = clip.file
+        if (!sourceFile.exists()) {
+            _message.value = "Source '${sourceFile.name}' does not exist"
+            _clipboard.value = null
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val dest = File(targetDir, sourceFile.name)
+                if (clip.isCut) {
+                    sourceFile.renameTo(dest)
+                    _clipboard.value = null
+                    _message.value = "Moved to '${dest.name}'"
+                } else {
+                    if (sourceFile.isDirectory) {
+                        sourceFile.copyRecursively(dest, overwrite = true)
+                    } else {
+                        sourceFile.copyTo(dest, overwrite = true)
+                    }
+                    _message.value = "Pasted '${dest.name}'"
+                }
+                _currentDir.value?.let { loadFiles(it) }
+            } catch (e: Exception) {
+                _message.value = "Paste failed: ${e.message}"
+            }
+        }
     }
 
     fun pasteToCurrentDir() {
@@ -559,4 +592,64 @@ class FilesViewModel @Inject constructor(
         val pre = "KMGTPE"[exp - 1]
         return String.format(Locale.US, "%.1f %sB", bytes / Math.pow(1024.0, exp.toDouble()), pre)
     }
+
+    fun shareFile(context: Context, file: File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val fileToShare = if (file.isDirectory) {
+                    val sharedDir = File(context.cacheDir, "shared_exports").apply { mkdirs() }
+                    val zipTarget = File(sharedDir, "${file.name}.zip")
+                    if (zipTarget.exists()) zipTarget.delete()
+                    java.io.FileOutputStream(zipTarget).use { fos ->
+                        FileUtils.zipDirectory(file, fos)
+                    }
+                    zipTarget
+                } else {
+                    file
+                }
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    fileToShare
+                )
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = if (fileToShare.extension.equals("zip", ignoreCase = true)) "application/zip" else "*/*"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(intent, "Share ${fileToShare.name}").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+            } catch (e: Exception) {
+                _message.value = "Share failed: ${e.message}"
+            }
+        }
+    }
+
+    fun importFileFromDevice(context: Context, uri: Uri) {
+        val currentDir = _currentDir.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                var fileName = "imported_file"
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIdx != -1 && cursor.moveToFirst()) {
+                        fileName = cursor.getString(nameIdx)
+                    }
+                }
+                val destFile = File(currentDir, fileName)
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                loadFiles(currentDir)
+                _message.value = "Imported $fileName (${formatFileSize(destFile.length())})"
+            } catch (e: Exception) {
+                _message.value = "Import failed: ${e.message}"
+            }
+        }
+    }
+
 }

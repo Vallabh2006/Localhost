@@ -284,14 +284,15 @@ private fun SystemMetricsCard(stats: SystemMetrics) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val usedMem = (stats.totalMemoryBytes - stats.availableMemoryBytes).coerceAtLeast(0L)
                 val memPct = if (stats.totalMemoryBytes > 0) (usedMem.toFloat() / stats.totalMemoryBytes.toFloat()) * 100f else 0f
+                val ramColor = if (memPct > 80f) StatusOrange else PrimaryAccent
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Physical RAM", color = TextSecondary, fontSize = 12.sp)
-                    Text("${formatBytes(usedMem)} / ${formatBytes(stats.totalMemoryBytes)} (${String.format(Locale.US, "%.0f%%", memPct)})", color = StatusGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("${formatBytes(usedMem)} / ${formatBytes(stats.totalMemoryBytes)} (${String.format(Locale.US, "%.0f%%", memPct)})", color = ramColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 LinearProgressIndicator(
                     progress = { (memPct / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color = StatusGreen,
+                    color = ramColor,
                     trackColor = DarkSurfaceElevated
                 )
                 if (stats.appHeapTotalBytes > 0) {

@@ -9,6 +9,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+
+object TerminalCache {
+    var cachedHistory: List<TerminalLine> = listOf(TerminalLine("", "Localhost Interactive CLI\nType 'help' for available commands.\n", "localhost:~$ "))
+    var cachedCwd: String? = null
+}
+
 data class TerminalLine(val command: String, val output: String, val cwd: String = "")
 
 @HiltViewModel
@@ -16,9 +22,9 @@ class TerminalViewModel @Inject constructor(
     private val localhostCli: LocalhostCli
 ) : ViewModel() {
 
-    private val _history = MutableStateFlow<List<TerminalLine>>(listOf(
-        TerminalLine("", "Localhost Interactive CLI\nType 'help' for available commands.\n", localhostCli.getCurrentPromptPrefix())
-    ))
+    private val _history = MutableStateFlow<List<TerminalLine>>(
+        TerminalCache.cachedHistory
+    )
     val history = _history.asStateFlow()
 
     private val _currentPath = MutableStateFlow(localhostCli.getCurrentPath())
@@ -41,6 +47,7 @@ class TerminalViewModel @Inject constructor(
             val currentOutput = StringBuilder()
             val targetIndex = _history.value.size
             _history.value = _history.value + TerminalLine(cmd, "", prompt)
+            TerminalCache.cachedHistory = _history.value
 
             try {
                 val out = localhostCli.execute(cmd) { chunk ->
@@ -49,18 +56,21 @@ class TerminalViewModel @Inject constructor(
                     if (targetIndex < list.size) {
                         list[targetIndex] = TerminalLine(cmd, currentOutput.toString(), prompt)
                         _history.value = list
+                    TerminalCache.cachedHistory = list
                     }
                 }
                 _currentPath.value = localhostCli.getCurrentPath()
 
                 if (out == "__CLEAR__") {
                     _history.value = emptyList()
+                    TerminalCache.cachedHistory = emptyList()
                 } else {
                     val finalOutput = if (currentOutput.isNotEmpty()) currentOutput.toString().trimEnd() else out
                     val list = _history.value.toMutableList()
                     if (targetIndex < list.size) {
                         list[targetIndex] = TerminalLine(cmd, finalOutput, prompt)
                         _history.value = list
+                    TerminalCache.cachedHistory = list
                     }
                 }
             } catch (_: Exception) {
@@ -68,6 +78,7 @@ class TerminalViewModel @Inject constructor(
                 if (targetIndex < list.size) {
                     list[targetIndex] = TerminalLine(cmd, "^C (Interrupted)", prompt)
                     _history.value = list
+                    TerminalCache.cachedHistory = list
                 }
             } finally {
                 _isRunning.value = false
@@ -84,6 +95,7 @@ class TerminalViewModel @Inject constructor(
         if (list.isNotEmpty() && list.last().output.isEmpty()) {
             list[list.lastIndex] = list.last().copy(output = "^C")
             _history.value = list
+                    TerminalCache.cachedHistory = list
         } else {
             _history.value = _history.value + TerminalLine("", "^C", prompt)
         }
@@ -91,5 +103,6 @@ class TerminalViewModel @Inject constructor(
 
     fun clear() {
         _history.value = emptyList()
+                    TerminalCache.cachedHistory = emptyList()
     }
 }

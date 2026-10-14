@@ -42,6 +42,7 @@ class ManagedProcess(
     private val scope: CoroutineScope,
     private val onRequestRecord: ((RequestRecord) -> Unit)? = null,
     private val isVpnBlocked: (() -> Boolean)? = null,
+    private val getVpnBlockedMessage: (() -> String)? = null,
     private val onCrash: (ManagedProcess) -> Unit
 ) {
     private val _status = MutableStateFlow(ProjectStatus.STOPPED)
@@ -197,6 +198,22 @@ class ManagedProcess(
                 env["TMPDIR"] = tmpDir.absolutePath
                 env["TEMP"] = tmpDir.absolutePath
                 env["TMP"] = tmpDir.absolutePath
+
+                val dotEnvFile = File(workDir, ".env")
+                if (dotEnvFile.exists()) {
+                    try {
+                        dotEnvFile.readLines().forEach { rawLine ->
+                            val line = rawLine.trim()
+                            if (line.isNotEmpty() && !line.startsWith("#") && line.contains("=")) {
+                                val key = line.substringBefore("=").trim()
+                                val value = line.substringAfter("=").trim().removeSurrounding("\"").removeSurrounding("'")
+                                if (key.isNotEmpty()) {
+                                    env[key] = value
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
 
                 if (project.runtime == RuntimeType.PYTHON) {
                     val projectVenv = listOf(
@@ -441,6 +458,37 @@ class ManagedProcess(
             val method = parts[0]
             val pathWithQuery = parts[1]
             val path = pathWithQuery.substringBefore("?")
+
+            if (isVpnBlocked?.invoke() == true) {
+                val clientIp = socket.inetAddress?.hostAddress ?: "127.0.0.1"
+                val errorCode = "ERR_VPN_403_" + String.format(Locale.US, "%06X", (System.currentTimeMillis() % 0xFFFFFF))
+                val customMsg = getVpnBlockedMessage?.invoke() ?: "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer."
+
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        logRepository.append(project.id, LogStream.STDERR, "[$clientIp] 403 Forbidden - VPN Detected ($errorCode). Access blocked.")
+                    } catch (_: Exception) {}
+                }
+
+                val html = renderVpnBlockedPage(
+                    projectName = project.name,
+                    port = port,
+                    clientIp = clientIp,
+                    errorCode = errorCode,
+                    errorMessage = customMsg
+                )
+                val blockedBytes = html.toByteArray(Charsets.UTF_8)
+                val resp = "HTTP/1.1 403 Forbidden\r\n" +
+                        "Content-Type: text/html; charset=utf-8\r\n" +
+                        "Content-Length: ${blockedBytes.size}\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Connection: close\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.write(blockedBytes)
+                output.flush()
+                onRequestRecord?.invoke(RequestRecord(projectId = project.id, timestamp = System.currentTimeMillis(), method = method, path = path, statusCode = 403, responseBytes = blockedBytes.size.toLong(), durationMs = 1L, errorMessage = "$errorCode [$clientIp] VPN Blocked"))
+                return
+            }
 
             var contentLength = 0
             var line: String?
@@ -795,4 +843,205 @@ class ManagedProcess(
             -1L
         }
     }
+
+    private fun renderVpnBlockedPage(
+        projectName: String,
+        port: Int,
+        clientIp: String,
+        errorCode: String,
+        errorMessage: String
+    ): String {
+        return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Detected • Localhost</title>
+    <style>
+        :root {
+            --bg: #0c0e14;
+            --surface: #141720;
+            --surface-elevated: #1b1f2c;
+            --border: #252a3a;
+            --error: #ef4444;
+            --error-glow: rgba(239, 68, 68, 0.15);
+            --text: #f3f4f8;
+            --text-secondary: #9aa3b8;
+            --text-muted: #646e85;
+            --primary: #5a75e0;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1.25rem;
+        }
+        .container {
+            width: 100%;
+            max-width: 520px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+        }
+        @media (max-width: 480px) {
+            .container { padding: 1.5rem 1.25rem; }
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .icon-shield {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--error-glow);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--error);
+            flex-shrink: 0;
+        }
+        .header-text h1 {
+            font-size: 1.35rem;
+            font-weight: 700;
+            line-height: 1.3;
+        }
+        .badge {
+            display: inline-block;
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--error);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-top: 0.3rem;
+        }
+        .message-box {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--error);
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+            margin-bottom: 1.5rem;
+            color: var(--text);
+            font-size: 0.95rem;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        @media (max-width: 440px) {
+            .info-grid { grid-template-columns: 1fr; }
+        }
+        .info-item {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.8rem 1rem;
+        }
+        .info-label {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+        .info-val {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text);
+            word-break: break-all;
+        }
+        .btn-retry {
+            display: block;
+            width: 100%;
+            padding: 0.85rem;
+            background: var(--primary);
+            color: #ffffff;
+            font-weight: 600;
+            font-size: 0.92rem;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            text-align: center;
+            transition: opacity 0.2s;
+        }
+        .btn-retry:hover { opacity: 0.9; }
+        .footer {
+            margin-top: 1.25rem;
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="icon-shield">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+            </div>
+            <div class="header-text">
+                <h1>VPN Detected</h1>
+                <span class="badge">403 Forbidden</span>
+            </div>
+        </div>
+
+        <div class="message-box">
+            $errorMessage
+        </div>
+
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Error Code</span>
+                <span class="info-val" style="color: var(--error);">$errorCode</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Client IP</span>
+                <span class="info-val">$clientIp</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Server</span>
+                <span class="info-val">$projectName</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Port</span>
+                <span class="info-val">:$port</span>
+            </div>
+        </div>
+
+        <button class="btn-retry" onclick="window.location.reload()">Retry Connection</button>
+
+        <div class="footer">
+            Localhost Mobile VPS • Android Protected Host
+        </div>
+    </div>
+</body>
+</html>"""
+    }
+
 }

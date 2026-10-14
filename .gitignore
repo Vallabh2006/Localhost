@@ -74,3 +74,4 @@ composer.phar
 tmp/
 temp/
 .cache/
+*.sql

@@ -42,6 +42,11 @@ class SettingsRepository @Inject constructor(
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val SAVED_TUNNEL_TOKENS = stringPreferencesKey("saved_tunnel_tokens")
         val ACCENT_COLOR_NAME = stringPreferencesKey("accent_color_name")
+        val SECONDARY_COLOR_HEX = stringPreferencesKey("secondary_color_hex")
+        val SUCCESS_COLOR_HEX = stringPreferencesKey("success_color_hex")
+        val FAIL_COLOR_HEX = stringPreferencesKey("fail_color_hex")
+        val WARN_COLOR_HEX = stringPreferencesKey("warn_color_hex")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
     }
 
     val wakeLockEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.WAKE_LOCK_ENABLED] ?: true }
@@ -50,6 +55,31 @@ class SettingsRepository @Inject constructor(
     val wifiOnlyMode: Flow<Boolean> = context.dataStore.data.map { it[Keys.WIFI_ONLY_MODE] ?: false }
     val onboardingCompleted: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_COMPLETED] ?: false }
     val accentColorName: Flow<String> = context.dataStore.data.map { it[Keys.ACCENT_COLOR_NAME] ?: "Indigo" }
+    val secondaryColorHex: Flow<String> = context.dataStore.data.map { it[Keys.SECONDARY_COLOR_HEX] ?: "#181C28" }
+    val successColorHex: Flow<String> = context.dataStore.data.map { it[Keys.SUCCESS_COLOR_HEX] ?: "#10B981" }
+    val failColorHex: Flow<String> = context.dataStore.data.map { it[Keys.FAIL_COLOR_HEX] ?: "#F43F5E" }
+    val warnColorHex: Flow<String> = context.dataStore.data.map { it[Keys.WARN_COLOR_HEX] ?: "#F59E0B" }
+    val themeMode: Flow<String> = context.dataStore.data.map { it[Keys.THEME_MODE] ?: "DARK" }
+
+    suspend fun setSecondaryColorHex(hex: String) {
+        context.dataStore.edit { it[Keys.SECONDARY_COLOR_HEX] = hex }
+    }
+
+    suspend fun setSuccessColorHex(hex: String) {
+        context.dataStore.edit { it[Keys.SUCCESS_COLOR_HEX] = hex }
+    }
+
+    suspend fun setFailColorHex(hex: String) {
+        context.dataStore.edit { it[Keys.FAIL_COLOR_HEX] = hex }
+    }
+
+    suspend fun setWarnColorHex(hex: String) {
+        context.dataStore.edit { it[Keys.WARN_COLOR_HEX] = hex }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        context.dataStore.edit { it[Keys.THEME_MODE] = mode }
+    }
 
     suspend fun setAccentColorName(name: String) {
         context.dataStore.edit { it[Keys.ACCENT_COLOR_NAME] = name }
@@ -180,6 +210,17 @@ class SettingsRepository @Inject constructor(
                 emptyList()
             }
             prefs[Keys.SAVED_TUNNEL_TOKENS] = Json.encodeToString<List<SavedTunnelToken>>(current)
+        }
+    }
+
+
+    fun getVpnBlockedMessage(projectId: String): Flow<String> = context.dataStore.data.map {
+        it[stringPreferencesKey("vpn_message_proj_" + projectId)] ?: "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer."
+    }
+
+    suspend fun setVpnBlockedMessage(projectId: String, message: String) {
+        context.dataStore.edit {
+            it[stringPreferencesKey("vpn_message_proj_" + projectId)] = message
         }
     }
 

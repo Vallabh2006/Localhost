@@ -2,8 +2,10 @@ package com.localhost.core.designsystem.component
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -17,6 +19,8 @@ fun AppLogo(
     Image(
         painter = painterResource(id = R.drawable.ic_app_logo),
         contentDescription = "Localhost Logo",
-        modifier = modifier.size(size)
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
     )
 }

@@ -42,6 +42,7 @@ class ProcessSupervisor @Inject constructor(
     private val processes = ConcurrentHashMap<String, ManagedProcess>()
     private val crashRetryCounts = ConcurrentHashMap<String, AtomicInteger>()
     private val vpnBlockedProjects = ConcurrentHashMap<String, Boolean>()
+    private val vpnBlockedMessages = ConcurrentHashMap<String, String>()
 
     private val _runningCount = MutableStateFlow(0)
     val runningCount = _runningCount.asStateFlow()
@@ -116,6 +117,11 @@ class ProcessSupervisor @Inject constructor(
                 vpnBlockedProjects[actualProject.id] = disabled
             }
         }
+        scope.launch {
+            settingsRepository.getVpnBlockedMessage(actualProject.id).collect { msg ->
+                vpnBlockedMessages[actualProject.id] = msg
+            }
+        }
 
         val managed = ManagedProcess(
             project = actualProject,
@@ -127,6 +133,10 @@ class ProcessSupervisor @Inject constructor(
                 scope.launch(Dispatchers.IO) {
                     try {
                         requestRecordDao.insert(record.toEntity())
+                        val clientIp = "127.0.0.1"
+                        val statusTag = if (record.statusCode in 200..299) "OK" else if (record.statusCode in 400..499) "CLIENT_ERR" else if (record.statusCode >= 500) "SERVER_ERR" else "INFO"
+                        val logLine = "[$clientIp] ${record.method} ${record.path} -> ${record.statusCode} $statusTag (${record.durationMs}ms)"
+                        logRepository.append(record.projectId, com.localhost.core.model.LogStream.SYSTEM, logLine)
                     } catch (_: Exception) {}
                 }
             },
@@ -134,6 +144,9 @@ class ProcessSupervisor @Inject constructor(
                 val vpnActive = NetworkUtils.isVpnActive(context)
                 val disabled = vpnBlockedProjects[actualProject.id] ?: false
                 vpnActive && disabled
+            },
+            getVpnBlockedMessage = {
+                vpnBlockedMessages[actualProject.id] ?: "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer."
             },
             onCrash = { crashedProc ->
                 handleCrash(crashedProc)

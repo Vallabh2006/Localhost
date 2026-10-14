@@ -38,6 +38,21 @@ class SettingsViewModel @Inject constructor(
     val accentColorName: StateFlow<String> = settingsRepository.accentColorName
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Indigo")
 
+    val secondaryColorHex: StateFlow<String> = settingsRepository.secondaryColorHex
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "#181C28")
+
+    val successColorHex: StateFlow<String> = settingsRepository.successColorHex
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "#10B981")
+
+    val failColorHex: StateFlow<String> = settingsRepository.failColorHex
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "#F43F5E")
+
+    val warnColorHex: StateFlow<String> = settingsRepository.warnColorHex
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "#F59E0B")
+
+    val themeMode: StateFlow<String> = settingsRepository.themeMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "DARK")
+
     val installedPacks: StateFlow<List<RuntimePack>> = runtimeManager.installedPacks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -67,6 +82,26 @@ class SettingsViewModel @Inject constructor(
 
     fun setAccentColorName(name: String) {
         viewModelScope.launch { settingsRepository.setAccentColorName(name) }
+    }
+
+    fun setSecondaryColorHex(hex: String) {
+        viewModelScope.launch { settingsRepository.setSecondaryColorHex(hex) }
+    }
+
+    fun setSuccessColorHex(hex: String) {
+        viewModelScope.launch { settingsRepository.setSuccessColorHex(hex) }
+    }
+
+    fun setFailColorHex(hex: String) {
+        viewModelScope.launch { settingsRepository.setFailColorHex(hex) }
+    }
+
+    fun setWarnColorHex(hex: String) {
+        viewModelScope.launch { settingsRepository.setWarnColorHex(hex) }
+    }
+
+    fun setThemeMode(mode: String) {
+        viewModelScope.launch { settingsRepository.setThemeMode(mode) }
     }
 
     fun installRuntime(pack: RuntimePack) {

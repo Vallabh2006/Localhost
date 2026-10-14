@@ -54,11 +54,7 @@ class SupervisorService : Service() {
             Runtime.getRuntime().exec(arrayOf("/system/bin/settings", "put", "global", "settings_enable_monitor_phantom_procs", "false"))
         } catch (_: Exception) {}
         try {
-            val notification = createNotification(
-                processSupervisor.runningCount.value,
-                cloudflareTunnelManager.tunnelStatus.value == TunnelStatus.CONNECTED,
-                nginxManager.proxyConfig.value.isRunning
-            )
+            val notification = createNotification()
             val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             } else {
@@ -74,11 +70,7 @@ class SupervisorService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             if (!isForegroundActive) {
-                val notification = createNotification(
-                    processSupervisor.runningCount.value,
-                    cloudflareTunnelManager.tunnelStatus.value == TunnelStatus.CONNECTED,
-                    nginxManager.proxyConfig.value.isRunning
-                )
+                val notification = createNotification()
                 val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 } else {
@@ -105,21 +97,48 @@ class SupervisorService : Service() {
                 cloudflareTunnelManager.tunnelStatus,
                 nginxManager.proxyConfig
             ) { count, tunnelStatus, proxyConfig ->
-                Triple(count, tunnelStatus == TunnelStatus.CONNECTED, proxyConfig.isRunning)
-            }.collect { (count, isCfRunning, isNginxRunning) ->
-                val isTunnelRunning = isCfRunning
-                val isAnyActive = count > 0 || isTunnelRunning
-
-                if (isAnyActive) {
+                val activeItems = mutableListOf<String>()
+                if (count > 0) {
+                    activeItems.add(if (count == 1) "1 Web Server running" else "$count Web Servers running")
+                }
+                if (tunnelStatus == TunnelStatus.CONNECTED) {
+                    activeItems.add("Cloudflare Tunnel active")
+                }
+                if (proxyConfig.isRunning) {
+                    activeItems.add("Port Forwarding (8443) active")
+                }
+                activeItems
+            }.collect { activeItems ->
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (activeItems.isNotEmpty()) {
                     acquireWakeLock()
                     acquireWifiLock()
-                }
-
-                val notification = createNotification(count, isCfRunning, isNginxRunning)
-                try {
-                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    val notification = createNotification(activeItems)
+                    val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    } else {
+                        0
+                    }
+                    try {
+                        ServiceCompat.startForeground(this@SupervisorService, NOTIFICATION_ID, notification, fgType)
+                        isForegroundActive = true
+                    } catch (_: Exception) {}
                     manager.notify(NOTIFICATION_ID, notification)
-                } catch (_: Exception) {}
+                } else {
+                    releaseLocks()
+                    if (isForegroundActive) {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                stopForeground(STOP_FOREGROUND_REMOVE)
+                            } else {
+                                @Suppress("DEPRECATION")
+                                stopForeground(true)
+                            }
+                            manager.cancel(NOTIFICATION_ID)
+                            isForegroundActive = false
+                        } catch (_: Exception) {}
+                    }
+                }
             }
         }
     }
@@ -163,7 +182,7 @@ class SupervisorService : Service() {
         } catch (_: Exception) {}
     }
 
-    private fun createNotification(runningCount: Int, isCfRunning: Boolean, isNginxRunning: Boolean = false): Notification {
+    private fun createNotification(activeItems: List<String> = emptyList()): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -173,17 +192,15 @@ class SupervisorService : Service() {
         )
 
         val title = when {
-            runningCount > 0 && (isCfRunning) -> "Localhost Active"
-            runningCount > 0 -> "Localhost Server Active"
-            isCfRunning -> "Cloudflare Tunnel Active"
-                        else -> "Localhost Platform"
+            activeItems.size == 1 -> activeItems[0]
+            activeItems.isNotEmpty() -> "Localhost Services Active"
+            else -> "Localhost"
         }
 
-        val text = when {
-            runningCount > 0 && (isCfRunning) -> "$runningCount server(s) running • Tunnel active"
-            runningCount > 0 -> "$runningCount server(s) running"
-            isCfRunning -> "Tunnel active and routing traffic"
-                        else -> "Localhost service standby"
+        val text = if (activeItems.isNotEmpty()) {
+            activeItems.joinToString(" • ")
+        } else {
+            "No active services"
         }
 
         return NotificationCompat.Builder(this, LocalhostApplication.CHANNEL_ID)

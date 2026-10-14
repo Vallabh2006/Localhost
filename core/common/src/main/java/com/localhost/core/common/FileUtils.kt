@@ -58,12 +58,13 @@ object FileUtils {
     fun zipDirectory(
         sourceDir: File,
         outputStream: OutputStream,
-        excludeDirNames: Set<String> = setOf(".venv", "node_modules", ".tmp", "__pycache__", ".git", ".idea", ".vscode")
+        excludeDirNames: Set<String> = setOf(".venv", "node_modules", ".tmp", "__pycache__", ".git", ".idea", ".vscode"),
+        includeDotEnv: Boolean = true
     ) {
         ZipOutputStream(outputStream).use { zos ->
             val files = sourceDir.walkTopDown()
                 .onEnter { dir -> !excludeDirNames.contains(dir.name) }
-                .filter { it.isFile }
+                .filter { it.isFile && (includeDotEnv || it.name != ".env") }
             for (file in files) {
                 try {
                     val relativePath = file.relativeTo(sourceDir).path

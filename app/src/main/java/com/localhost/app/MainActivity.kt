@@ -1,5 +1,31 @@
 package com.localhost.app
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import com.localhost.core.designsystem.theme.TextOnAccent
+
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -85,6 +111,8 @@ import com.localhost.feature.monitor.MonitorViewModel
 import com.localhost.feature.projects.CreateProjectScreen
 import com.localhost.feature.projects.ProjectDetailScreen
 import com.localhost.feature.projects.ProjectListScreen
+import com.localhost.feature.projects.database.DatabaseScreen
+import androidx.compose.material.icons.filled.Storage
 import com.localhost.feature.projects.ProjectsViewModel
 import com.localhost.feature.settings.SettingsScreen
 import com.localhost.feature.settings.SettingsViewModel
@@ -99,6 +127,7 @@ import javax.inject.Inject
 sealed class Screen(val route: String, val title: String, val icon: ImageVector? = null) {
     data object Monitor : Screen("monitor", "Monitor", Icons.Default.BarChart)
     data object Projects : Screen("projects", "Projects", Icons.Default.Folder)
+    data object Databases : Screen("databases", "Databases", Icons.Default.Storage)
     data object Terminal : Screen("terminal", "Terminal", Icons.Default.Terminal)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     data object ProjectDetail : Screen("project_detail/{projectId}", "Detail")
@@ -108,14 +137,27 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector?
     data object Tunnel : Screen("tunnel", "Tunnel")
 }
 
+
+data class SharedIncomingPayload(
+    val uri: Uri? = null,
+    val text: String? = null,
+    val fileName: String = "shared_file"
+)
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    @Inject
+    lateinit var projectRepository: com.localhost.core.data.repository.ProjectRepository
+
+    private var sharedPayload by mutableStateOf<SharedIncomingPayload?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleShareIntent(intent)
         try {
             requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         } catch (_: Exception) {}
@@ -131,8 +173,60 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val accentName by settingsRepository.accentColorName.collectAsState(initial = "Indigo")
-            LocalhostTheme(accentName = accentName) {
-                AppWithSplash()
+            val secondaryHex by settingsRepository.secondaryColorHex.collectAsState(initial = "#181C28")
+            val successHex by settingsRepository.successColorHex.collectAsState(initial = "#10B981")
+            val failHex by settingsRepository.failColorHex.collectAsState(initial = "#F43F5E")
+            val warnHex by settingsRepository.warnColorHex.collectAsState(initial = "#F59E0B")
+            val themeMode by settingsRepository.themeMode.collectAsState(initial = "DARK")
+
+            LocalhostTheme(
+                accentName = accentName,
+                secondaryHex = secondaryHex,
+                successHex = successHex,
+                failHex = failHex,
+                warnHex = warnHex,
+                themeMode = themeMode
+            ) {
+                AppWithSplash(sharedPayload = sharedPayload, onDismissShared = { sharedPayload = null }, projectRepository = projectRepository)
+            }
+        }
+    }
+
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        if (action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE) {
+            val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            }
+            val text: String? = intent.getStringExtra(Intent.EXTRA_TEXT)
+            var fName: String? = null
+            if (uri != null) {
+                try {
+                    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (idx != -1 && cursor.moveToFirst()) {
+                            fName = cursor.getString(idx)
+                        }
+                    }
+                } catch (_: Exception) {}
+                if (fName == null) {
+                    fName = uri.lastPathSegment ?: "shared_file"
+                }
+            } else if (text != null) {
+                fName = "shared_snippet.txt"
+            }
+            if (uri != null || text != null) {
+                sharedPayload = SharedIncomingPayload(uri = uri, text = text, fileName = fName ?: "shared_file")
             }
         }
     }
@@ -153,7 +247,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AppWithSplash() {
+fun AppWithSplash(sharedPayload: SharedIncomingPayload? = null, onDismissShared: () -> Unit = {}, projectRepository: com.localhost.core.data.repository.ProjectRepository? = null) {
     var isSplashVisible by remember { mutableStateOf(true) }
     var startAnimation by remember { mutableStateOf(false) }
 
@@ -176,7 +270,7 @@ fun AppWithSplash() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        MainApp()
+        MainApp(sharedPayload = sharedPayload, onDismissShared = onDismissShared, projectRepository = projectRepository)
 
         AnimatedVisibility(
             visible = isSplashVisible,
@@ -231,7 +325,7 @@ fun AppWithSplash() {
 }
 
 @Composable
-fun MainApp() {
+fun MainApp(sharedPayload: SharedIncomingPayload? = null, onDismissShared: () -> Unit = {}, projectRepository: com.localhost.core.data.repository.ProjectRepository? = null) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -239,12 +333,22 @@ fun MainApp() {
     val bottomNavItems = listOf(
         Screen.Monitor,
         Screen.Projects,
+        Screen.Databases,
         Screen.Terminal,
         Screen.Settings
     )
 
     val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
     val showBottomBar = bottomNavItems.any { it.route == currentRoute } && !isImeVisible
+
+        if (sharedPayload != null && projectRepository != null) {
+        IncomingShareDialog(
+            payload = sharedPayload,
+            projectRepository = projectRepository,
+            navController = navController,
+            onDismiss = onDismissShared
+        )
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -263,12 +367,10 @@ fun MainApp() {
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
-                                navController.navigate(screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
+                                if (currentRoute != screen.route) {
+                                    navController.navigate(screen.route) {
+                                        launchSingleTop = true
                                     }
-                                    launchSingleTop = true
-                                    restoreState = true
                                 }
                             },
                             icon = { screen.icon?.let { Icon(it, contentDescription = screen.title) } },
@@ -309,6 +411,10 @@ fun MainApp() {
                     viewModel = vm,
                     onProjectClick = { id -> navController.navigate("project_detail/$id") }
                 )
+            }
+
+            composable(Screen.Databases.route) {
+                DatabaseScreen()
             }
 
             composable(Screen.Projects.route) { backStackEntry ->
@@ -394,4 +500,152 @@ fun MainApp() {
             }
         }
     }
+}
+
+@Composable
+fun IncomingShareDialog(
+    payload: SharedIncomingPayload,
+    projectRepository: com.localhost.core.data.repository.ProjectRepository,
+    navController: androidx.navigation.NavController,
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val projects by projectRepository.observeAll().collectAsState(initial = emptyList())
+    var selectedMode by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceElevated,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Share, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(24.dp))
+                Column {
+                    Text("Shared File Received", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
+                    Text(payload.fileName, color = PrimaryAccent, fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (selectedMode == null) {
+                    Text(
+                        "Would you like to import this shared file into an existing project or create a new project?",
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                        lineHeight = 18.sp
+                    )
+
+                    Button(
+                        onClick = {
+                            if (projects.isEmpty()) {
+                                Toast.makeText(context, "No existing projects found. Create a new one.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                selectedMode = "EXISTING"
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccentContainer),
+                        border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Folder, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Import into Existing Project", color = PrimaryAccent, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            onDismiss()
+                            navController.navigate(Screen.Projects.route)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Create New Project", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Text("Select Target Project:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        projects.forEach { proj ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = DarkSurface,
+                                border = BorderStroke(1.dp, DarkBorderSubtle),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        coroutineScope.launch(Dispatchers.IO) {
+                                            try {
+                                                val targetDir = java.io.File(proj.workingDir)
+                                                if (!targetDir.exists()) targetDir.mkdirs()
+                                                if (payload.uri != null) {
+                                                    if (payload.fileName.endsWith(".zip", ignoreCase = true)) {
+                                                        context.contentResolver.openInputStream(payload.uri)?.use { inStream ->
+                                                            com.localhost.core.common.FileUtils.unzip(inStream, targetDir)
+                                                        }
+                                                    } else {
+                                                        val destFile = java.io.File(targetDir, payload.fileName)
+                                                        context.contentResolver.openInputStream(payload.uri)?.use { inStream ->
+                                                            destFile.outputStream().use { outStream -> inStream.copyTo(outStream) }
+                                                        }
+                                                    }
+                                                } else if (payload.text != null) {
+                                                    java.io.File(targetDir, "shared_snippet.txt").writeText(payload.text)
+                                                }
+                                                if (proj.runtime == com.localhost.core.model.RuntimeType.PYTHON) {
+                                                    val venvDir = java.io.File(targetDir, ".venv")
+                                                    if (!venvDir.exists()) {
+                                                        venvDir.mkdirs()
+                                                        java.io.File(venvDir, "bin").mkdirs()
+                                                        java.io.File(venvDir, "lib/python3.11/site-packages").mkdirs()
+                                                        java.io.File(venvDir, "pyvenv.cfg").writeText("home = /system/bin\ninclude-system-site-packages = true\nversion = 3.11.9\n")
+                                                    }
+                                                }
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(context, "Imported '${payload.fileName}' to ${proj.name}", Toast.LENGTH_SHORT).show()
+                                                    onDismiss()
+                                                    navController.navigate("project_detail/${proj.id}")
+                                                }
+                                            } catch (e: Exception) {
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(proj.name, fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                                        Text("${proj.runtime.displayName} (: ${proj.port})", color = TextMuted, fontSize = 11.sp)
+                                    }
+                                    Icon(Icons.Default.ArrowForward, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = {
+                if (selectedMode != null) selectedMode = null
+                else onDismiss()
+            }) {
+                Text(if (selectedMode != null) "Back" else "Cancel", color = TextSecondary)
+            }
+        }
+    )
 }

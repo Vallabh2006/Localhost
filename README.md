@@ -1,22 +1,22 @@
-# Localhost
+# Localhost for Android
 
-Localhost is an all-in-one local development environment and server hosting platform for Android. It enables developers to scaffold, run, edit, manage, and tunnel web applications directly on Android devices with background persistence and real-time telemetry.
+Localhost is a local development server platform and runtime environment designed for Android devices. It enables developers to host web applications, test backend code, manage isolated environments, inspect network traffic, and access services locally or over the internet via secure tunnels.
 
 ---
 
 ## Core Features
 
-- Multi-Runtime Support: Native process execution for Python (Flask/FastAPI/pip), Node.js (Express/npm), PHP with Composer dependency management, Java OpenJDK 17 (.jar and source execution), and static HTML/CSS/JS web servers.
-- Project Controls: Instant Start, Stop, and Restart buttons on both dashboard process cards and project detail views.
-- Project Creation and Import: Template scaffolding, ZIP archive import and SAF export with dependency exclusion, and direct GitHub repository URL cloning (`https://github.com/user/repo`).
-- Scoped File Explorer: Breadcrumb address navigation with recent path suggestions, long-press context menu (Rename, Details, Download, Cut, Copy, Delete), new file and folder creation, centered GIF previews, and rendered Markdown viewer.
-- Real-Time Code Editor: Syntax color highlighting for Python, JavaScript, TypeScript, PHP, Java, HTML, CSS, JSON, and Shell scripts, paired with contextual token and variable auto-complete.
+- Multi-Runtime Support: Native execution for Python (Flask, FastAPI, venv, pip), Node.js (Express, npm), PHP with Composer, Java OpenJDK 17 (.jar and source code execution), and static HTML, CSS, JS web servers.
+- Project Controls: Reorganized control center featuring Server Stop, Restart, and Start controls at the top, Cloudflare Tunnel with custom port configuration, LAN Port Forwarding with port prompt, VPN Visits access control, and Delete Project at the bottom in red.
+- Project Creation and Import: Template scaffolding, ZIP archive import, Storage Access Framework device file import, direct file sharing from external apps, and public GitHub repository URL cloning (`https://github.com/user/repo`).
+- Configurations Management: Dedicated Configurations tab replacing packages view, featuring entrypoint priority sequencing (app.py default first, followed by main.py, fully configurable), live project root .env file reader and editor with auto-injection, older Python version installer, requirements freezer (`pip freeze > requirements.txt`), and fresh isolated .venv generation.
+- Real-Time Syntax Validation: In-editor syntax validation engine with status badge and inline diagnostics for JSON (trailing comma detection and bracket checks), Python (unmatched brackets, unclosed quotes, missing colons), PHP (opening tags, braces), JavaScript, TypeScript, HTML, XML, and .env files.
+- Scoped File Explorer: Breadcrumb navigation, scroll position preservation between editor transitions, unsaved changes confirmation dialog (Save and Exit, Discard, Cancel), context menu actions (Rename, Details, Share, Download, Cut, Copy, Delete), and rendered Markdown preview.
+- Terminal and Logs: Reordered tabs with Terminal followed by Log. Persistent command history across sessions, quick accessory keyboard keys (`Tab`, `Ctrl+C`, `clear`, `ls -la`, `pwd`, `pip list`), detailed HTTP request logging (client IP, method, path, color-coded status codes, and duration), and one-tap log export via Android Share Sheet.
+- Real-Time Server Analytics: Linux `/proc` CPU utilization sampler, memory usage metrics, disk storage quota tracking (250MB threshold), and request breakdown by HTTP method and status code ranges.
 - Local Nginx HTTPS Proxy: Embedded TLS reverse proxy with automatic self-signed certificate generation to access local servers securely over HTTPS (`https://localhost:8443` and `https://<LAN_IP>:8443`).
 - Cloudflare Named Tunnels: Cloudflared named tunnel integration with encrypted persistent token storage, token history dropdown selection, and instant activation.
-- In-App CLI Terminal: Interactive terminal shell featuring virtual accessory keyboard keys (`Tab`, `Ctrl+C`, `|`, `-`, `/`, `~`, `↑`, `↓`, `Clear`), forgiving flag and command parsing (`-ls a`, `curl`, `chmod`, `composer`, `pip`, `python`, `node`), command auto-suggestions, and styled prompt format.
-- Real-Time Server Telemetry: Accurate Linux `/proc` CPU utilization sampler with multi-core detection, physical RAM and JVM heap analysis, storage monitoring, battery and uptime tracking, listening socket health with collision checks, and live Rx/Tx network throughput.
-- Adaptive Supervisor Service: Single foreground notification active strictly when a server process is running or a tunnel is connected, automatically dismissed when all services are idle.
-- Modern Material 3 UI: Compact 48dp top bars, custom accent color themes (Cyan, Emerald, Purple, Amber, Crimson), and scalable responsive layouts for phones and tablets.
+- System and Performance Settings: CPU Wake Lock toggle to prevent processor sleep during active server sessions, direct button launcher for Android system battery optimization exemption settings, and interactive theme accent color customizer with live color wheel.
 - Security and Isolation: AES-256-GCM Keystore encryption for tunnel tokens and dashboard credentials, sandboxed process execution directories, and scoped filesystem operations.
 
 ---
@@ -35,58 +35,47 @@ Localhost is an all-in-one local development environment and server hosting plat
 ```bash
 git clone https://github.com/localhost/localhost-android.git
 cd localhost-android
-./gradlew assembleDebug
+./gradlew assembleFullDebug
 ```
 
 The compiled APK will be located at:
 `app/build/outputs/apk/full/debug/app-full-debug.apk`
+or in the project root as `Localhost.apk`.
 
 ---
 
 ## Usage Guide
 
-### 1. Creating and Importing Projects
+### 1. Creating and Managing Projects
 
 - From Template: Tap `+` on the Projects screen, enter a project name, select a runtime (Python, Node.js, PHP, Java, Static), specify the entry file and port, and tap Create.
 - From GitHub: Tap the download icon in the top bar, enter any public repository URL (`https://github.com/owner/repo`), and Localhost clones and configures the workspace automatically.
-- From ZIP Archive: Tap the folder import icon to load an archive from Android storage. Localhost extracts the files, autodetects the project runtime, and sets up startup commands.
+- From ZIP or Device File: Use the import action to load files or archives directly into the active project.
+- Exiting Editor: If modifications are detected when exiting the editor, a confirmation prompt appears asking to Save and Exit, Discard, or Cancel.
 
-### 2. Dependency Management
+### 2. Configurations and Environments
 
-- Python: Use the Packages tab to install packages individually or install via `requirements.txt`.
-- PHP: Download and run `composer.phar` directly through the PHP package manager or via the in-app terminal (`composer install`, `composer require <pkg>`).
-- Node.js: Run `npm install` directly within project directories using the CLI terminal.
+- Entrypoint Priority: Specify execution order for entrypoint scripts (for Python, defaults to app.py first, then main.py).
+- Environment Variables: Edit the .env file directly from the Configurations tab. Values are automatically loaded and injected into process runtime environments.
+- Python Virtual Environments: Click Regenerate Fresh .venv to build an isolated virtual environment in the project root directory. Use Freeze Requirements to write current dependencies to requirements.txt.
+- PHP Composer: Manage dependencies directly with composer.phar support via the in-app terminal or package manager.
 
-### 3. Tunnels and HTTPS Access
+### 3. Tunnels and Control Panel
 
-- Local HTTPS Proxy: Open the Tunnel screen, select your target project, and tap Start HTTPS Proxy. Access your project securely at `https://localhost:8443` or from other devices on your local network.
-- Cloudflare Named Tunnel: Enter your Cloudflare Tunnel token. Localhost securely saves the token in your encrypted history list for quick one-tap reuse.
+- Controls Ordering: Use the Control tab to access lifecycle operations:
+  1. Stop, Restart, and Start buttons at the top.
+  2. Cloudflare Quick Tunnel with custom port prompt.
+  3. LAN Port Forwarding with port input.
+  4. VPN Visits toggle.
+  5. Delete Project button at the bottom.
 
-### 4. In-App CLI Terminal
+### 4. Terminal and Logs
 
-#### Common Commands
-
-- `pwd`: Print working directory.
-- `cd <path>`: Change directory.
-- `ls [-la] [path]`: List directory contents with forgiving flag support (e.g. `-ls a`).
-- `tree [path]`: View directory hierarchy tree.
-- `cat <file>`: Print file contents.
-- `mkdir <dir>`: Create directory.
-- `touch <file>`: Create file.
-- `cp <src> <dst>`: Copy file or folder.
-- `mv <src> <dst>`: Move or rename file or folder.
-- `rm [-r] <path>`: Delete file or directory.
-- `curl <url>`: Send HTTP GET request and display response.
-- `chmod <perms> <file>`: Update file permissions.
-- `composer <args>`: Execute PHP Composer.
-- `python <script.py>` / `pip <args>`: Execute Python and pip.
-- `node <script.js>` / `npm <args>`: Execute Node.js and npm.
-- `php <script.php>`: Execute PHP scripts.
-- `list`: List all configured projects.
-- `start <name>` / `stop <name>` / `restart <name>`: Manage server lifecycles.
-- `logs <name>`: Display recent stdout and stderr logs.
-- `status`: Show platform and service status.
-- `clear`: Clear console output.
+- Access the combined Terminal and Log tab from the project details screen.
+- Persistent Terminal: Command inputs and terminal output persist across navigation changes.
+- Log Filtering: Filter logs by STDOUT, STDERR, or SYSTEM streams, or search log text without vertical clipping.
+- HTTP Request Tracking: Incoming requests are recorded with timestamp, client IP, method, status code, and latency in milliseconds.
+- Export Logs: Use the Share button to export complete log outputs to text files or external applications.
 
 ---
 
@@ -114,8 +103,7 @@ Localhost/
 │   │   ├── RuntimeType
 │   │   ├── LogEntry
 │   │   ├── ResourceMetrics
-│   │   ├── TunnelModels
-│   │   └── RuntimePack
+│   │   └── TunnelModels
 │   ├── security/
 │   │   ├── Keystore-backed SecretStore
 │   │   └── Password Hashing
@@ -160,13 +148,16 @@ Localhost/
     ├── projects/
     │   ├── ProjectListScreen
     │   ├── ProjectDetailScreen
-    │   └── ProjectsViewModel
+    │   ├── ProjectsViewModel
+    │   └── database/
+    │       ├── DatabaseScreen
+    │       └── DatabaseViewModel
     ├── logs/
     │   ├── LogViewerScreen
     │   └── LogsViewModel
     ├── files/
     │   ├── FileExplorerScreen
-    │   ├── SyntaxHighlighter
+    │   ├── SyntaxValidator
     │   └── FilesViewModel
     ├── monitor/
     │   ├── MonitorScreen
@@ -178,6 +169,52 @@ Localhost/
         ├── SettingsScreen
         └── SettingsViewModel
 ```
+
+---
+
+## Changes in Version 1.0.1
+
+- Dual Independent Database Services: Decoupled MySQL (port 3306) and PostgreSQL (port 5432) into distinct, independently controlled services with individual connection status, port binding, and service switcher tabs.
+- Real-Time Connection Verification: Connect action performs socket connection verification to the target host and port before establishing an active session, displaying descriptive feedback on connection failure.
+- Non-Persistent Connection Testing: Test Connection action verifies reachability without modifying or persisting active connection state.
+- Default Root User and Empty Password: Default user configured to root with empty password credentials for both MySQL and PostgreSQL engines.
+- Database User Management: Added user administration actions including Change Password and Delete User directly from the Users and Permissions management tab.
+- Interactive Database Schema Visualizer: Added Visualize tab rendering interactive schema diagrams with database root nodes, table entity cards displaying column names, data types, and primary keys, and foreign key relationships connected with distinct orange connector lines in a non-overlapping staggered layout.
+- SQL Dump Export: Export database schemas and optional table data rows into standard .sql files with actions to share directly via Android Share Sheet or save locally to the device Downloads directory.
+- SQL Dump Import: Added SQL import action allowing selection and execution of .sql dump files directly into existing databases.
+- Automatic Python Virtual Environment Scaffolding: Automatically scaffolds an isolated .venv environment with pyvenv.cfg, activation scripts, and site-packages on project creation, ZIP archive extraction, GitHub repository clone, and external share imports.
+- Project Archive Export Filtering: Automatically excludes .venv directories from exported project ZIP archives and detects .env files, displaying a user prompt to exclude sensitive environment variables (recommended) or include them.
+- File Editor First Keystroke Scroll Fix: Resolved first typing scroll-to-top bug by preventing editor text buffer state resets during active user input.
+- Light Mode Input Field Contrast: Fixed white text rendering in light mode input fields by using adaptive text colors across text fields.
+- Storage Quota Slider Lower Bound: Enforced minimum storage quota slider value of at least current disk usage plus 5 MB.
+- Unsaved Changes Navigation Confirmation: Added confirmation prompts when navigating away from modified storage quota, entrypoints, and settings panels.
+- Hex Picker and Shade Slider Decoupling: Refactored color picker wheel canvas to prevent pixelation under dark shades and decoupled shade slider adjustments from hue calculations.
+- Contextual Foreground Service Notification: Replaced static standby notification with dynamic listing of running servers, Cloudflare tunnels, and port forwards; automatically removes notification when all services are stopped.
+- Process Log Filter Field Padding: Added horizontal and vertical padding around the log filter input field matching terminal accessory bar spacing.
+- Circular Project Logo: Top-left navigation branding and splash screen app logos styled as a circular icon.
+- Two-Step Project Creation Workflow: Project creation split into two steps: runtime stack selection first, followed by source selection (Empty, ZIP archive, or Git clone) with strict project name validation enforcing uniqueness across existing projects and alphanumeric or underscore characters.
+- External Share Sheet Integration: Receive files shared directly from WhatsApp or any Android app with an immediate prompt to import into an existing project or create a new project.
+- File Explorer Clipboard and Folder Sharing: Full Copy, Cut, and Paste support with Paste appearing only when items are on the clipboard, directory sharing with automatic on-the-fly ZIP compression, and connected portrait mode Details and Rename dialogs.
+- Interactive Line Graph Analytics: Replaced bar charts with smooth, touch-interactive line graphs with grid lines, gradient fills, and touch inspection points displaying exact timestamps and metric values.
+- Reordered Control Tab: Reordered controls to place Server Process Control (Stop, Restart, Start) first, followed by LAN Port Forwarding, Cloudflare Tunnel (token input only), VPN Visits access control with customizable warning message, and Delete Project.
+- Light Mode and Theme Refinements: Proper secondary palette utilization for elevated surfaces in light mode, improved placeholder text contrast, throttled color wheel updates (100ms) to eliminate lag, darkness and shade slider, and bidirectional manual hex code synchronization.
+- System Telemetry RAM Metric: Physical RAM progress indicator aligned with the active theme accent instead of hardcoded success green.
+- PHP Composer Download Button: Download card button in Settings standardized to match Python and Node.js download card styling.
+- App About Section: Streamlined changelog highlights with clean bullet points and a link to the project repository.
+- Window Insets and Layout: Resolved status bar padding in the file viewer and code editor so system status bars and camera cutouts never overlap UI controls; ensured navigation bar padding on terminal and accessory bars.
+- Process Logs and Terminal: Expanded text height in log filters to prevent vertical font glyph truncation; integrated formatted timestamps [HH:mm:ss] across live logs; routed visited request logs to STDERR.
+- Persistent Terminal Sessions: Terminal histories in both the main CLI and project detail terminal now persist across tab transitions and navigation changes without clearing on return.
+- Real-Time Syntax Validation: Added syntax validator for JSON, Python, PHP, JavaScript, and HTML with status indicators in the editor header.
+- Dedicated Language Configurations: Separated configuration options for each runtime (Python, PHP, Node.js, Java, and Static HTML) with editable main entrypoint file names (e.g. app.py, main.py, index.php, server.js).
+- Python Tooling and Virtual Environments: Automatic .env file loading and saving with immediate edit and delete state reactivity; fresh .venv regeneration; Freeze Requirements modal prompting for custom output file name and path; older Python version selector.
+- PHP Composer Integration: Added dark Material 3 styled Composer management panel to run composer install, update, and require package commands.
+- Cloudflare Tunnel Dashboard: Display active live public URLs for named and quick tunnels directly on the project dashboard with copy and open in browser actions.
+- Theme Customizer and Hex Code Inputs: Added support for 5 distinct palette roles (Primary, Secondary, Success, Fail, Warn) with direct hex code text input, interactive color wheel, quick presets, and Light, Dark, and System Default theme modes.
+- Storage Quota: Added configurable slider supporting project storage quotas from 100MB up to 1GB.
+- Back Gesture Fix: Improved back navigation across bottom navigation tabs and project detail tabs to ensure back gestures navigate 1 step back in chronological order.
+- VPN Detection and Configurable Error Page: Added configurable VPN error message option in Project Settings under VPN control, defaulting to "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer." Flagged VPN visitors are served a responsive dark theme error page displaying the custom message, unique error code (e.g. ERR_VPN_403_XXXXXX), visitor IPv4 or IPv6 address, and server target. The exact error code and visitor IP are also recorded to the project terminal log.
+- Responsive Demo Project Landing Pages: Redesigned empty starter templates for Static HTML5, Python Flask, Node.js Express, PHP, and Java to share the responsive card design, automatically adjusting to screen dimensions and presenting basic stack information (runtime version, port, host, status, and health ping endpoints).
+- Database Integration (MySQL and PostgreSQL): Added dedicated Databases tab to bottom navigation providing full MySQL and PostgreSQL client integration. Includes host, port, root user, and password connection configuration with test button; Database Explorer with table schema inspector and interactive table data viewer; Query Console with multi-line SQL editor, quick template snippets, execution timing, and query results viewer; and User and Permissions Management supporting user creation, privilege grants and revokes, and user deletion.
 
 ---
 
