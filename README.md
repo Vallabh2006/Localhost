@@ -172,6 +172,23 @@ Localhost/
 
 ---
 
+## Changes in Version 1.0.2
+
+- VS Code Style Worldwide Port Forwarding: Allows specifying any local port to tunnel directly to a public worldwide HTTPS URL via Cloudflare Quick Tunnel, accessible from anywhere on the internet, featuring instant link copying, browser launch, and QR code sharing.
+- Database Services Default to Stopped: Initial database service state for both MySQL and PostgreSQL defaults to stopped instead of automatically running.
+- Offline Connection Testing Guard: Test Connection action is disabled and rejected when the database service is stopped, preventing false test attempts against inactive services.
+- Full Builtin SQL Function Support: Expanded recursive SQL expression evaluator supporting standard built-in functions for MySQL and PostgreSQL, including REPEAT, REPLACE, CHAR, CHR, CONCAT, UPPER, LOWER, LENGTH, CHAR_LENGTH, TRIM, LTRIM, RTRIM, REVERSE, LEFT, RIGHT, LPAD, RPAD, SUBSTRING, MD5, HEX, UNHEX, ROUND, FLOOR, CEIL, ABS, MOD, POW, SQRT, PI, RAND, COALESCE, IFNULL, NULLIF, NOW, CURRENT_TIMESTAMP, CURDATE, CURRENT_DATE, CURTIME, CURRENT_TIME, VERSION, DATABASE, and USER.
+- Empty Default Query Input: Query Console input field starts empty without hardcoded pre-filled queries.
+- Instant User Management State Updates: Immediately reflects newly created users, password updates, and privilege changes in the UI without requiring tab switching.
+- Dedicated Database Activity Logs: Added Logs tab in Database Studio displaying real-time timestamped event logs for service status changes, connection tests, query executions, and user modifications, with copy and clear actions.
+- Text Editor Valid Badge Removal: Removed the redundant valid tick badge from the editor header, displaying badges only when syntax errors or warnings are detected.
+- Text Editor Scroll and Focus Stability: Eliminated scroll-to-top behavior when the virtual keyboard opens, and added automatic viewport repositioning to keep the cursor in view when typing after scrolling.
+- System Navigation Bar Insets Compliance: Fixed layout occlusion by ensuring all non-bottom-bar destinations and full-screen views respect Android 3-button system navigation bars (Back, Home, Recents).
+- High Frequency Theme Color Picker Updates: Throttled color wheel and shade slider updates to 0.05 seconds (50ms) for real-time responsiveness.
+- Sample Project Scaffold: Created Python database test project with .env configuration, supporting both MySQL and PostgreSQL modes with 5 sample cat records and dynamic record creation.
+
+---
+
 ## Changes in Version 1.0.1
 
 - Dual Independent Database Services: Decoupled MySQL (port 3306) and PostgreSQL (port 5432) into distinct, independently controlled services with individual connection status, port binding, and service switcher tabs.

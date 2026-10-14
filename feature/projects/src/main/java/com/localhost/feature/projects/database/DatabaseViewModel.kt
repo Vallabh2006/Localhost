@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import javax.inject.Inject
 
 data class TableSchemaEntry(
@@ -45,20 +44,23 @@ class DatabaseViewModel @Inject constructor(
     private val _postgresConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.POSTGRESQL, port = 5432, user = "root", password = ""))
     val postgresConfig: StateFlow<DatabaseConfig> = _postgresConfig.asStateFlow()
 
-    private val _isMysqlConnected = MutableStateFlow(true)
+    private val _isMysqlConnected = MutableStateFlow(false)
     val isMysqlConnected: StateFlow<Boolean> = _isMysqlConnected.asStateFlow()
 
-    private val _isPostgresConnected = MutableStateFlow(true)
+    private val _isPostgresConnected = MutableStateFlow(false)
     val isPostgresConnected: StateFlow<Boolean> = _isPostgresConnected.asStateFlow()
 
-    private val _mysqlMessage = MutableStateFlow<String?>("MySQL Service ready on 127.0.0.1:3306")
+    private val _mysqlMessage = MutableStateFlow<String?>("MySQL Service stopped")
     val mysqlMessage: StateFlow<String?> = _mysqlMessage.asStateFlow()
 
-    private val _postgresMessage = MutableStateFlow<String?>("PostgreSQL Service ready on 127.0.0.1:5432")
+    private val _postgresMessage = MutableStateFlow<String?>("PostgreSQL Service stopped")
     val postgresMessage: StateFlow<String?> = _postgresMessage.asStateFlow()
 
     private val _testConnectionResult = MutableStateFlow<String?>(null)
     val testConnectionResult: StateFlow<String?> = _testConnectionResult.asStateFlow()
+
+    private val _databaseLogs = MutableStateFlow<List<String>>(listOf("[SYSTEM] Database Studio initialized. Services currently stopped."))
+    val databaseLogs: StateFlow<List<String>> = _databaseLogs.asStateFlow()
 
     private val _databases = MutableStateFlow<List<String>>(emptyList())
     val databases: StateFlow<List<String>> = _databases.asStateFlow()
@@ -101,8 +103,19 @@ class DatabaseViewModel @Inject constructor(
     val isConnected: Boolean
         get() = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
 
+    fun addLog(msg: String) {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+        _databaseLogs.value = (_databaseLogs.value + "[$timestamp] $msg").takeLast(500)
+    }
+
+    fun clearLogs() {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        _databaseLogs.value = listOf("[$timestamp] [SYSTEM] Logs cleared")
+    }
+
     fun selectService(engine: DatabaseEngine) {
         _selectedEngine.value = engine
+        addLog("[ENGINE] Switched active studio engine to ${engine.displayName}")
         loadDatabases()
         loadUsers()
     }
@@ -125,17 +138,30 @@ class DatabaseViewModel @Inject constructor(
                 database = db.trim()
             )
         }
+        addLog("[CONFIG] Updated connection parameters for ${_selectedEngine.value.displayName}")
     }
 
     fun testConnection() {
+        val eng = _selectedEngine.value
+        val isRunning = if (eng == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
+        if (!isRunning) {
+            val err = "Failed: ${eng.displayName} service is stopped. Start the service first."
+            _testConnectionResult.value = err
+            addLog("[WARN] Connection test blocked: $err")
+            return
+        }
         viewModelScope.launch {
             _isExecuting.value = true
             val cfg = activeConfig
             val res = databaseClient.testConnection(cfg)
             _testConnectionResult.value = if (res.isSuccess) {
-                "Success: " + res.getOrNull()
+                val msg = "Success: " + res.getOrNull()
+                addLog("[TEST] $msg")
+                msg
             } else {
-                "Failed: " + (res.exceptionOrNull()?.message ?: "Unknown error")
+                val msg = "Failed: " + (res.exceptionOrNull()?.message ?: "Unknown error")
+                addLog("[ERROR] $msg")
+                msg
             }
             _isExecuting.value = false
         }
@@ -159,6 +185,7 @@ class DatabaseViewModel @Inject constructor(
                     _isPostgresConnected.value = true
                     _postgresMessage.value = res.getOrNull()
                 }
+                addLog("[SERVICE] ${eng.displayName} service started on ${cfg.host}:${cfg.port}")
                 loadDatabases()
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Connection refused"
@@ -169,31 +196,42 @@ class DatabaseViewModel @Inject constructor(
                     _isPostgresConnected.value = false
                     _postgresMessage.value = err
                 }
+                addLog("[ERROR] Failed to start ${eng.displayName} service: $err")
             }
             _isExecuting.value = false
         }
     }
 
     fun disconnect() {
-        if (_selectedEngine.value == DatabaseEngine.MYSQL) {
+        val eng = _selectedEngine.value
+        if (eng == DatabaseEngine.MYSQL) {
             _isMysqlConnected.value = false
-            _mysqlMessage.value = "Disconnected from MySQL Service"
+            _mysqlMessage.value = "MySQL Service stopped"
         } else {
             _isPostgresConnected.value = false
-            _postgresMessage.value = "Disconnected from PostgreSQL Service"
+            _postgresMessage.value = "PostgreSQL Service stopped"
+        }
+        addLog("[SERVICE] ${eng.displayName} service stopped")
+    }
+
+    fun restartService() {
+        viewModelScope.launch {
+            val eng = _selectedEngine.value
+            addLog("[SERVICE] Restarting ${eng.displayName} service...")
+            disconnect()
+            kotlinx.coroutines.delay(350)
+            connect()
         }
     }
 
     fun loadDatabases() {
         viewModelScope.launch {
-            val list = databaseClient.listDatabases(_selectedEngine.value)
-            _databases.value = list
-            if (list.isNotEmpty()) {
-                val db = if (list.contains(_selectedDatabase.value)) _selectedDatabase.value else list.first()
-                _selectedDatabase.value = db
-                loadTables(db)
-                loadAllSchemas(db)
+            val dbs = databaseClient.listDatabases(_selectedEngine.value)
+            _databases.value = dbs
+            if (dbs.isNotEmpty() && !_databases.value.contains(_selectedDatabase.value)) {
+                _selectedDatabase.value = dbs.first()
             }
+            loadTables(_selectedDatabase.value)
         }
     }
 
@@ -207,12 +245,12 @@ class DatabaseViewModel @Inject constructor(
         viewModelScope.launch {
             val tbls = databaseClient.listTables(_selectedEngine.value, database)
             _tables.value = tbls
-            if (tbls.isNotEmpty()) {
-                val t = if (tbls.contains(_selectedTable.value)) _selectedTable.value ?: tbls.first() else tbls.first()
-                _selectedTable.value = t
-                selectTable(database, t)
+            val currentSelected = _selectedTable.value
+            val nextTable = if (tbls.contains(currentSelected)) currentSelected else tbls.firstOrNull()
+            _selectedTable.value = nextTable
+            if (nextTable != null) {
+                selectTable(database, nextTable)
             } else {
-                _selectedTable.value = null
                 _tableSchema.value = emptyList()
                 _tableData.value = null
             }
@@ -222,8 +260,9 @@ class DatabaseViewModel @Inject constructor(
     fun selectTable(database: String, table: String) {
         _selectedTable.value = table
         viewModelScope.launch {
-            _tableSchema.value = databaseClient.getTableSchema(_selectedEngine.value, database, table)
-            _tableData.value = databaseClient.getTableData(_selectedEngine.value, database, table)
+            val eng = _selectedEngine.value
+            _tableSchema.value = databaseClient.getTableSchema(eng, database, table)
+            _tableData.value = databaseClient.getTableData(eng, database, table)
         }
     }
 
@@ -245,8 +284,14 @@ class DatabaseViewModel @Inject constructor(
         if (sql.isBlank()) return
         viewModelScope.launch {
             _isExecuting.value = true
+            addLog("[SQL] $sql")
             val res = databaseClient.executeQuery(_selectedEngine.value, _selectedDatabase.value, sql)
             _queryResult.value = res
+            if (res.isSuccess) {
+                addLog("[SQL-RESULT] Success (${res.affectedRows} rows, ${res.executionTimeMs}ms)")
+            } else {
+                addLog("[SQL-ERROR] ${res.errorMessage}")
+            }
             _isExecuting.value = false
             loadDatabases()
             _selectedTable.value?.let { selectTable(_selectedDatabase.value, it) }
@@ -264,35 +309,40 @@ class DatabaseViewModel @Inject constructor(
         if (username.isBlank()) return
         viewModelScope.launch {
             databaseClient.createUser(_selectedEngine.value, username, host, pass)
-            loadUsers()
+            _users.value = databaseClient.listUsers(_selectedEngine.value)
+            addLog("[USER] Created user '$username'@'$host'")
         }
     }
 
     fun changePassword(username: String, newPass: String) {
         viewModelScope.launch {
             databaseClient.changeUserPassword(_selectedEngine.value, username, newPass)
-            loadUsers()
+            _users.value = databaseClient.listUsers(_selectedEngine.value)
+            addLog("[USER] Changed password for '$username'")
         }
     }
 
     fun deleteUser(username: String) {
         viewModelScope.launch {
             databaseClient.deleteUser(_selectedEngine.value, username)
-            loadUsers()
+            _users.value = databaseClient.listUsers(_selectedEngine.value)
+            addLog("[USER] Deleted user '$username'")
         }
     }
 
     fun grantPrivileges(username: String, host: String, db: String, perms: List<String>) {
         viewModelScope.launch {
             databaseClient.grantPermissions(_selectedEngine.value, username, host, db, perms)
-            loadUsers()
+            _users.value = databaseClient.listUsers(_selectedEngine.value)
+            addLog("[USER] Granted privileges ${perms.joinToString(", ")} to '$username'@'$host'")
         }
     }
 
     fun revokePrivileges(username: String, host: String, db: String) {
         viewModelScope.launch {
             databaseClient.revokePermissions(_selectedEngine.value, username, host, db)
-            loadUsers()
+            _users.value = databaseClient.listUsers(_selectedEngine.value)
+            addLog("[USER] Revoked privileges from '$username'@'$host'")
         }
     }
 
@@ -365,12 +415,14 @@ class DatabaseViewModel @Inject constructor(
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Imported SQL: $executedCount statements executed successfully", Toast.LENGTH_LONG).show()
                 }
+                addLog("[IMPORT] Imported SQL: $executedCount statements executed")
                 loadDatabases()
                 loadAllSchemas(_selectedDatabase.value)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "SQL Import failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
+                addLog("[ERROR] SQL Import failed: ${e.message}")
             } finally {
                 _isExecuting.value = false
             }
@@ -403,10 +455,12 @@ class DatabaseViewModel @Inject constructor(
                         Toast.makeText(context, "Saved to Downloads: ${dest.name}", Toast.LENGTH_LONG).show()
                     }
                 }
+                addLog("[EXPORT] Exported SQL dump for database '$database'")
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
+                addLog("[ERROR] Export error: ${e.message}")
             }
         }
     }

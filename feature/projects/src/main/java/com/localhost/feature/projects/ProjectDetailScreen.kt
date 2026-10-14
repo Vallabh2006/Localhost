@@ -2371,9 +2371,10 @@ private fun ControlTab(
     var namedTokenInput by remember { mutableStateOf("") }
 
     var showForwardPortDialog by remember { mutableStateOf(false) }
-    var forwardPortInput by remember(project.port) { mutableStateOf("8443") }
-    val proxyConfig by viewModel.proxyConfig.collectAsState()
-    val isForwardingThisProject = proxyConfig.isRunning && proxyConfig.targetPort == project.port
+    var forwardPortInput by remember(project.port) { mutableStateOf(project.port.toString()) }
+    val forwardedPort by viewModel.forwardedPort.collectAsState()
+    val isForwarding = (forwardedPort != null && tunnelStatus == TunnelStatus.CONNECTED && activeTunnelUrl.isNotBlank())
+    val isConnecting = (forwardedPort != null && tunnelStatus == TunnelStatus.CONNECTING)
 
     Column(
         modifier = Modifier
@@ -2461,7 +2462,7 @@ private fun ControlTab(
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            border = BorderStroke(1.dp, if (isForwardingThisProject) StatusGreen.copy(alpha = 0.5f) else DarkBorder)
+            border = BorderStroke(1.dp, if (isForwarding) StatusGreen.copy(alpha = 0.5f) else if (isConnecting) StatusOrange.copy(alpha = 0.5f) else DarkBorder)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
@@ -2475,15 +2476,29 @@ private fun ControlTab(
                         Text("Port Forwarding", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                     }
 
-                    if (isForwardingThisProject) {
+                    if (isForwarding) {
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = StatusGreen.copy(alpha = 0.15f),
                             border = BorderStroke(1.dp, StatusGreen)
                         ) {
                             Text(
-                                text = "Active",
+                                text = "Worldwide HTTPS Active",
                                 color = StatusGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    } else if (isConnecting) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = StatusOrange.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, StatusOrange)
+                        ) {
+                            Text(
+                                text = "Connecting...",
+                                color = StatusOrange,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -2492,13 +2507,9 @@ private fun ControlTab(
                     }
                 }
 
-                if (isForwardingThisProject) {
-                    val localIp = com.localhost.core.common.NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
-                    val lanHttpsUrl = if (proxyConfig.lanHttpsUrl.isNotBlank()) proxyConfig.lanHttpsUrl else "https://$localIp:${proxyConfig.httpsPort}"
-                    val directHttpUrl = "http://$localIp:${project.port}"
-
+                if (isForwarding) {
                     Text(
-                        "Port ${project.port} is actively forwarded with HTTPS reverse proxy on port ${proxyConfig.httpsPort}.",
+                        "Port $forwardedPort is actively forwarded with a public worldwide HTTPS link. Anyone around the world can access it.",
                         color = TextSecondary,
                         fontSize = 12.sp
                     )
@@ -2511,21 +2522,12 @@ private fun ControlTab(
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Column {
-                                Text("LAN HTTPS Link (Secure Proxy):", fontSize = 10.sp, color = TextMuted)
+                                Text("Worldwide HTTPS Link (Public Internet):", fontSize = 10.sp, color = TextMuted)
                                 Text(
-                                    text = lanHttpsUrl,
+                                    text = activeTunnelUrl,
                                     fontSize = 12.sp,
                                     color = PrimaryAccent,
                                     fontWeight = FontWeight.SemiBold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                            Column {
-                                Text("Direct LAN HTTP Link:", fontSize = 10.sp, color = TextMuted)
-                                Text(
-                                    text = directHttpUrl,
-                                    fontSize = 12.sp,
-                                    color = TextSecondary,
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
@@ -2537,9 +2539,9 @@ private fun ControlTab(
                                 OutlinedButton(
                                     onClick = {
                                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                        val clip = android.content.ClipData.newPlainText("Forwarded URL", lanHttpsUrl)
+                                        val clip = android.content.ClipData.newPlainText("Forwarded URL", activeTunnelUrl)
                                         clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Copied HTTPS link", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Copied Worldwide HTTPS link", Toast.LENGTH_SHORT).show()
                                     },
                                     shape = RoundedCornerShape(8.dp),
                                     border = BorderStroke(1.dp, DarkBorder),
@@ -2553,7 +2555,7 @@ private fun ControlTab(
                                 Button(
                                     onClick = {
                                         try {
-                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lanHttpsUrl))
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(activeTunnelUrl))
                                             context.startActivity(intent)
                                         } catch (e: Exception) {
                                             Toast.makeText(context, "Cannot open browser", Toast.LENGTH_SHORT).show()
@@ -2580,12 +2582,25 @@ private fun ControlTab(
                     ) {
                         Text("Stop Port Forwarding", color = StatusRed, fontWeight = FontWeight.Bold)
                     }
+                } else if (isConnecting) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = PrimaryAccent)
+                    Text("Creating public worldwide HTTPS tunnel for port $forwardedPort...", color = TextSecondary, fontSize = 12.sp)
+
+                    OutlinedButton(
+                        onClick = { viewModel.stopPortForwarding() },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cancel", color = StatusRed, fontWeight = FontWeight.Bold)
+                    }
                 } else {
-                    Text("Forward local Android ports to custom host interfaces or proxy listeners.", color = TextSecondary, fontSize = 12.sp)
+                    Text("Forward any local port to a public worldwide HTTPS URL (like VS Code port forwarding) so anyone around the world can access it.", color = TextSecondary, fontSize = 12.sp)
 
                     Button(
                         onClick = {
-                            forwardPortInput = "8443"
+                            forwardPortInput = project.port.toString()
                             showForwardPortDialog = true
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
@@ -2593,7 +2608,7 @@ private fun ControlTab(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Configure Port Forwarding", color = PrimaryAccent, fontWeight = FontWeight.Bold)
+                        Text("Forward a Port...", color = PrimaryAccent, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2852,15 +2867,15 @@ private fun ControlTab(
         AlertDialog(
             onDismissRequest = { showForwardPortDialog = false },
             containerColor = DarkSurfaceElevated,
-            title = { Text("Port Forwarding", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            title = { Text("Forward a Port", fontWeight = FontWeight.Bold, color = TextPrimary) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Forward project port ${project.port} to external HTTPS port:", color = TextSecondary, fontSize = 13.sp)
+                    Text("Enter the local port you want to tunnel to a public worldwide HTTPS URL (like VS Code port forwarding):", color = TextSecondary, fontSize = 13.sp)
                     OutlinedTextField(
                         value = forwardPortInput,
                         onValueChange = { forwardPortInput = it },
-                        label = { Text("External HTTPS Port", fontSize = 11.sp, color = TextMuted) },
-                        placeholder = { Text("8443", color = TextMuted, fontSize = 12.sp) },
+                        label = { Text("Port to Forward", fontSize = 11.sp, color = TextMuted) },
+                        placeholder = { Text("${project.port}", color = TextMuted, fontSize = 12.sp) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
@@ -2872,13 +2887,13 @@ private fun ControlTab(
             confirmButton = {
                 Button(
                     onClick = {
-                        val p = forwardPortInput.toIntOrNull() ?: 8443
+                        val p = forwardPortInput.toIntOrNull() ?: project.port
                         showForwardPortDialog = false
-                        viewModel.startPortForwarding(project.port, p)
+                        viewModel.startPortForwarding(p)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
                 ) {
-                    Text("Forward", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                    Text("Forward Port", color = TextOnAccent, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

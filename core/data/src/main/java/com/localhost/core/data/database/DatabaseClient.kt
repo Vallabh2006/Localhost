@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -69,6 +70,8 @@ class DatabaseClient @Inject constructor() {
             )
         )
     )
+
+    private val definedTableColumns = mutableMapOf<String, List<String>>()
 
     private val userPasswords = mutableMapOf<Pair<DatabaseEngine, String>, String>(
         Pair(DatabaseEngine.MYSQL, "root") to "",
@@ -133,20 +136,32 @@ class DatabaseClient @Inject constructor() {
 
     suspend fun listTables(engine: DatabaseEngine, database: String): List<String> = withContext(Dispatchers.IO) {
         val dbs = if (engine == DatabaseEngine.MYSQL) mysqlDatabases else postgresDatabases
-        dbs[database]?.keys?.toList() ?: emptyList()
+        val dbMatch = dbs.entries.firstOrNull { it.key.equals(database, ignoreCase = true) }
+        dbMatch?.value?.keys?.toList() ?: emptyList()
     }
 
     suspend fun getTableSchema(engine: DatabaseEngine, database: String, table: String): List<ColumnInfo> = withContext(Dispatchers.IO) {
         val dbs = if (engine == DatabaseEngine.MYSQL) mysqlDatabases else postgresDatabases
-        val rows = dbs[database]?.get(table) ?: return@withContext emptyList()
-        val cols = rows.firstOrNull()?.keys ?: return@withContext emptyList()
+        val dbMatch = dbs.entries.firstOrNull { it.key.equals(database, ignoreCase = true) }?.value ?: return@withContext emptyList()
+        val tableEntry = dbMatch.entries.firstOrNull { it.key.equals(table, ignoreCase = true) }
+        val rows = tableEntry?.value
+        val key = "${database.lowercase()}.${table.lowercase()}"
+        val definedCols = definedTableColumns[key]
+        val cols = if (!rows.isNullOrEmpty()) {
+            rows.first().keys.toList()
+        } else if (!definedCols.isNullOrEmpty()) {
+            definedCols
+        } else {
+            listOf("id", "created_at")
+        }
         cols.map { col ->
             val isPk = col.equals("id", ignoreCase = true) || col.endsWith("_id", ignoreCase = true)
             val type = when {
                 isPk -> if (engine == DatabaseEngine.MYSQL) "INT AUTO_INCREMENT" else "SERIAL PRIMARY KEY"
                 col.contains("date", ignoreCase = true) || col.contains("at", ignoreCase = true) -> "DATETIME"
                 col.contains("email", ignoreCase = true) || col.contains("name", ignoreCase = true) -> "VARCHAR(255)"
-                col.contains("status", ignoreCase = true) || col.contains("role", ignoreCase = true) -> "VARCHAR(64)"
+                col.contains("status", ignoreCase = true) || col.contains("role", ignoreCase = true) || col.contains("breed", ignoreCase = true) || col.contains("color", ignoreCase = true) -> "VARCHAR(64)"
+                col.contains("age", ignoreCase = true) || col.contains("count", ignoreCase = true) || col.contains("port", ignoreCase = true) -> "INT"
                 else -> "TEXT"
             }
             ColumnInfo(
@@ -160,12 +175,301 @@ class DatabaseClient @Inject constructor() {
 
     suspend fun getTableData(engine: DatabaseEngine, database: String, table: String): TableData = withContext(Dispatchers.IO) {
         val dbs = if (engine == DatabaseEngine.MYSQL) mysqlDatabases else postgresDatabases
-        val rows = dbs[database]?.get(table) ?: return@withContext TableData(table, emptyList(), emptyList())
-        val cols = rows.firstOrNull()?.keys?.toList() ?: emptyList()
+        val dbMatch = dbs.entries.firstOrNull { it.key.equals(database, ignoreCase = true) }?.value ?: return@withContext TableData(table, emptyList(), emptyList())
+        val tableEntry = dbMatch.entries.firstOrNull { it.key.equals(table, ignoreCase = true) }
+        val rows = tableEntry?.value ?: return@withContext TableData(table, emptyList(), emptyList())
+        val key = "${database.lowercase()}.${table.lowercase()}"
+        val definedCols = definedTableColumns[key]
+        val cols = if (rows.isNotEmpty()) {
+            rows.first().keys.toList()
+        } else if (!definedCols.isNullOrEmpty()) {
+            definedCols
+        } else {
+            emptyList()
+        }
         val rowList = rows.map { rowMap ->
             cols.map { col -> rowMap[col] ?: "NULL" }
         }
         TableData(table, cols, rowList)
+    }
+
+    private fun findFromClause(sql: String): Int {
+        var inQuote: Char? = null
+        var depth = 0
+        val len = sql.length
+        var i = 0
+        while (i < len - 4) {
+            val c = sql[i]
+            if (inQuote != null) {
+                if (c == inQuote) inQuote = null
+            } else if (c == '\'' || c == '"' || c == '`') {
+                inQuote = c
+            } else if (c == '(') {
+                depth++
+            } else if (c == ')') {
+                if (depth > 0) depth--
+            } else if (depth == 0) {
+                if ((i == 0 || sql[i - 1].isWhitespace()) &&
+                    sql.substring(i, i + 4).equals("FROM", ignoreCase = true) &&
+                    (i + 4 == len || sql[i + 4].isWhitespace())
+                ) {
+                    return i
+                }
+            }
+            i++
+        }
+        return -1
+    }
+
+    private fun parseFunctionArgs(argsStr: String): List<String> {
+        val args = mutableListOf<String>()
+        var inQuote: Char? = null
+        var depth = 0
+        var current = StringBuilder()
+
+        for (c in argsStr) {
+            if (inQuote != null) {
+                current.append(c)
+                if (c == inQuote) inQuote = null
+            } else if (c == '\'' || c == '"' || c == '`') {
+                inQuote = c
+                current.append(c)
+            } else if (c == '(') {
+                depth++
+                current.append(c)
+            } else if (c == ')') {
+                if (depth > 0) depth--
+                current.append(c)
+            } else if (c == ',' && depth == 0) {
+                args.add(current.toString().trim())
+                current = StringBuilder()
+            } else {
+                current.append(c)
+            }
+        }
+        if (current.isNotBlank()) {
+            args.add(current.toString().trim())
+        }
+        return args
+    }
+
+    private fun evaluateSqlExpression(expr: String, engine: DatabaseEngine): String {
+        val trimmed = expr.trim()
+        if (trimmed.isEmpty()) return ""
+
+        if ((trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) ||
+            (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length >= 2)
+        ) {
+            val inner = trimmed.substring(1, trimmed.length - 1)
+            return inner.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").replace("\\\'", "\'").replace("\\\"", "\"")
+        }
+
+        val upper = trimmed.uppercase()
+        if (upper == "NULL") return "NULL"
+        if (upper == "TRUE") return "1"
+        if (upper == "FALSE") return "0"
+        if (upper == "PI()") return Math.PI.toString()
+        if (upper == "RAND()" || upper == "RANDOM()") return Math.random().toString()
+        if (upper == "NOW()" || upper == "CURRENT_TIMESTAMP" || upper == "CURRENT_TIMESTAMP()" || upper == "LOCALTIME" || upper == "LOCALTIMESTAMP") {
+            return java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        }
+        if (upper == "CURDATE()" || upper == "CURRENT_DATE" || upper == "CURRENT_DATE()") {
+            return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        }
+        if (upper == "CURTIME()" || upper == "CURRENT_TIME" || upper == "CURRENT_TIME()") {
+            return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        }
+        if (upper == "VERSION()" || upper == "@@VERSION") {
+            return if (engine == DatabaseEngine.MYSQL) "8.4.1-Localhost" else "PostgreSQL 16.2 (Localhost Engine)"
+        }
+        if (upper == "DATABASE()" || upper == "CURRENT_DATABASE()" || upper == "SCHEMA()") {
+            return "localhost_app"
+        }
+        if (upper == "USER()" || upper == "CURRENT_USER()" || upper == "SYSTEM_USER()" || upper == "SESSION_USER()") {
+            return "root@localhost"
+        }
+        if (upper == "CONNECTION_ID()") {
+            return "42"
+        }
+
+        if (trimmed.contains("(") && trimmed.endsWith(")")) {
+            val parenIdx = trimmed.indexOf("(")
+            val funcName = trimmed.substring(0, parenIdx).trim().uppercase()
+            val innerArgs = trimmed.substring(parenIdx + 1, trimmed.length - 1).trim()
+            val parsedArgs = parseFunctionArgs(innerArgs)
+            val evaledArgs = parsedArgs.map { evaluateSqlExpression(it, engine) }
+
+            when (funcName) {
+                "REPEAT" -> {
+                    val s = evaledArgs.getOrNull(0) ?: ""
+                    val count = evaledArgs.getOrNull(1)?.toIntOrNull() ?: 1
+                    return s.repeat(count.coerceAtLeast(0))
+                }
+                "REPLACE" -> {
+                    val s = evaledArgs.getOrNull(0) ?: ""
+                    val search = evaledArgs.getOrNull(1) ?: ""
+                    val replacement = evaledArgs.getOrNull(2) ?: ""
+                    return s.replace(search, replacement)
+                }
+                "CHAR", "CHR" -> {
+                    return evaledArgs.mapNotNull { it.toIntOrNull()?.toChar()?.toString() }.joinToString("")
+                }
+                "ASCII" -> {
+                    return (evaledArgs.firstOrNull()?.firstOrNull()?.code ?: 0).toString()
+                }
+                "CONCAT" -> {
+                    return evaledArgs.joinToString("")
+                }
+                "UPPER", "UCASE" -> {
+                    return evaledArgs.firstOrNull()?.uppercase() ?: ""
+                }
+                "LOWER", "LCASE" -> {
+                    return evaledArgs.firstOrNull()?.lowercase() ?: ""
+                }
+                "LENGTH", "LEN", "CHAR_LENGTH", "CHARACTER_LENGTH" -> {
+                    return (evaledArgs.firstOrNull()?.length ?: 0).toString()
+                }
+                "TRIM" -> {
+                    return evaledArgs.firstOrNull()?.trim() ?: ""
+                }
+                "LTRIM" -> {
+                    return evaledArgs.firstOrNull()?.trimStart() ?: ""
+                }
+                "RTRIM" -> {
+                    return evaledArgs.firstOrNull()?.trimEnd() ?: ""
+                }
+                "REVERSE" -> {
+                    return evaledArgs.firstOrNull()?.reversed() ?: ""
+                }
+                "LEFT" -> {
+                    val s = evaledArgs.getOrNull(0) ?: ""
+                    val count = evaledArgs.getOrNull(1)?.toIntOrNull() ?: 0
+                    return s.take(count.coerceAtLeast(0))
+                }
+                "RIGHT" -> {
+                    val s = evaledArgs.getOrNull(0) ?: ""
+                    val count = evaledArgs.getOrNull(1)?.toIntOrNull() ?: 0
+                    return s.takeLast(count.coerceAtLeast(0))
+                }
+                "LPAD" -> {
+                    val s = evaledArgs.getOrNull(0) ?: ""
+                    val len = evaledArgs.getOrNull(1)?.toIntOrNull() ?: s.length
+                    val pad = evaledArgs.getOrNull(2) ?: " "
+                    if (s.length >= len) return s.take(len)
+                    val toPad = len - s.length
+                    return pad.repeat((toPad / pad.length) + 1).take(toPad) + s
+                }
+                "RPAD" -> {
+                    val s = evaledArgs.getOrNull(0) ?: ""
+                    val len = evaledArgs.getOrNull(1)?.toIntOrNull() ?: s.length
+                    val pad = evaledArgs.getOrNull(2) ?: " "
+                    if (s.length >= len) return s.take(len)
+                    val toPad = len - s.length
+                    return s + pad.repeat((toPad / pad.length) + 1).take(toPad)
+                }
+                "SUBSTRING", "SUBSTR" -> {
+                    val s = evaledArgs.getOrNull(0) ?: ""
+                    val start = (evaledArgs.getOrNull(1)?.toIntOrNull() ?: 1) - 1
+                    val len = evaledArgs.getOrNull(2)?.toIntOrNull()
+                    if (start >= 0 && start < s.length) {
+                        return if (len != null) s.substring(start, (start + len).coerceAtMost(s.length)) else s.substring(start)
+                    }
+                    return ""
+                }
+                "MD5" -> {
+                    val s = evaledArgs.firstOrNull() ?: ""
+                    val md = MessageDigest.getInstance("MD5")
+                    val digest = md.digest(s.toByteArray(Charsets.UTF_8))
+                    return digest.joinToString("") { "%02x".format(it) }
+                }
+                "HEX" -> {
+                    val s = evaledArgs.firstOrNull() ?: ""
+                    val num = s.toLongOrNull()
+                    return if (num != null) java.lang.Long.toHexString(num).uppercase()
+                    else s.toByteArray(Charsets.UTF_8).joinToString("") { "%02X".format(it) }
+                }
+                "UNHEX" -> {
+                    val s = evaledArgs.firstOrNull() ?: ""
+                    return try {
+                        val bytes = ByteArray(s.length / 2)
+                        for (idx in bytes.indices) {
+                            bytes[idx] = s.substring(idx * 2, idx * 2 + 2).toInt(16).toByte()
+                        }
+                        String(bytes, Charsets.UTF_8)
+                    } catch (_: Exception) { "" }
+                }
+                "ROUND" -> {
+                    val num = evaledArgs.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+                    val dec = evaledArgs.getOrNull(1)?.toIntOrNull() ?: 0
+                    return String.format(java.util.Locale.US, "%.${dec}f", num)
+                }
+                "FLOOR" -> {
+                    val num = evaledArgs.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+                    return Math.floor(num).toLong().toString()
+                }
+                "CEIL", "CEILING" -> {
+                    val num = evaledArgs.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+                    return Math.ceil(num).toLong().toString()
+                }
+                "ABS" -> {
+                    val num = evaledArgs.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+                    val res = Math.abs(num)
+                    return if (res % 1.0 == 0.0) res.toLong().toString() else res.toString()
+                }
+                "MOD" -> {
+                    val n1 = evaledArgs.getOrNull(0)?.toLongOrNull() ?: 0L
+                    val n2 = evaledArgs.getOrNull(1)?.toLongOrNull() ?: 1L
+                    return (n1 % n2).toString()
+                }
+                "POW", "POWER" -> {
+                    val base = evaledArgs.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+                    val exp = evaledArgs.getOrNull(1)?.toDoubleOrNull() ?: 1.0
+                    val res = Math.pow(base, exp)
+                    return if (res % 1.0 == 0.0) res.toLong().toString() else res.toString()
+                }
+                "SQRT" -> {
+                    val n = evaledArgs.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+                    val res = Math.sqrt(n)
+                    return if (res % 1.0 == 0.0) res.toLong().toString() else res.toString()
+                }
+                "COALESCE" -> {
+                    return evaledArgs.firstOrNull { it.isNotBlank() && !it.equals("NULL", ignoreCase = true) } ?: "NULL"
+                }
+                "IFNULL" -> {
+                    val a = evaledArgs.getOrNull(0) ?: ""
+                    val b = evaledArgs.getOrNull(1) ?: ""
+                    return if (a.isNotBlank() && !a.equals("NULL", ignoreCase = true)) a else b
+                }
+                "NULLIF" -> {
+                    val a = evaledArgs.getOrNull(0) ?: ""
+                    val b = evaledArgs.getOrNull(1) ?: ""
+                    return if (a == b) "NULL" else a
+                }
+            }
+        }
+
+        if (trimmed.contains("+") || trimmed.contains("-") || trimmed.contains("*") || trimmed.contains("/")) {
+            val parts = trimmed.split(Regex("""\s*([\+\-\*\/])\s*""")).filter { it.isNotBlank() }
+            if (parts.size == 2) {
+                val d1 = parts[0].toDoubleOrNull()
+                val d2 = parts[1].toDoubleOrNull()
+                if (d1 != null && d2 != null) {
+                    val op = trimmed.firstOrNull { it in "+-*/" }
+                    val calc = when (op) {
+                        '+' -> d1 + d2
+                        '-' -> d1 - d2
+                        '*' -> d1 * d2
+                        '/' -> if (d2 != 0.0) d1 / d2 else Double.NaN
+                        else -> null
+                    }
+                    if (calc != null) {
+                        return if (calc % 1.0 == 0.0) calc.toLong().toString() else calc.toString()
+                    }
+                }
+            }
+        }
+
+        return trimmed
     }
 
     suspend fun executeQuery(engine: DatabaseEngine, database: String, sql: String): QueryResult = withContext(Dispatchers.IO) {
@@ -189,56 +493,232 @@ class DatabaseClient @Inject constructor() {
                     val tables = targetDb.keys.toList()
                     QueryResult(true, System.currentTimeMillis() - start, tables.size, listOf("Tables_in_$database"), tables.map { listOf(it) })
                 }
+                upper.startsWith("USE ") -> {
+                    val targetName = cleanSql.substring(4).trim().filter { it !in "`'\"; \t\r\n" }
+                    if (dbs.keys.any { it.equals(targetName, ignoreCase = true) }) {
+                        QueryResult(true, System.currentTimeMillis() - start, 0)
+                    } else {
+                        QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Unknown database '$targetName'")
+                    }
+                }
                 upper.startsWith("SELECT") -> {
-                    val fromIdx = upper.indexOf("FROM ")
+                    val fromIdx = findFromClause(cleanSql)
                     if (fromIdx != -1) {
-                        val afterFrom = cleanSql.substring(fromIdx + 5).trim()
-                        val rawTableToken = afterFrom.split(Regex("""\s+"""))[0]
+                        val beforeFrom = cleanSql.substring(6, fromIdx).trim()
+                        val afterFrom = cleanSql.substring(fromIdx + 4).trim()
+
+                        var whereClause: String? = null
+                        var limitCount: Int? = null
+
+                        val upperAfter = afterFrom.uppercase()
+                        var tablePart = afterFrom
+
+                        val limitIdx = upperAfter.lastIndexOf("LIMIT ")
+                        if (limitIdx != -1) {
+                            val limitStr = afterFrom.substring(limitIdx + 6).trim().split(Regex("""\s+"""))[0]
+                            limitCount = limitStr.toIntOrNull()
+                            tablePart = tablePart.substring(0, limitIdx).trim()
+                        }
+
+                        val whereIdx = tablePart.uppercase().indexOf("WHERE ")
+                        if (whereIdx != -1) {
+                            whereClause = tablePart.substring(whereIdx + 6).trim()
+                            tablePart = tablePart.substring(0, whereIdx).trim()
+                        }
+
+                        val rawTableToken = tablePart.split(Regex("""\s+"""))[0]
                         val cleanTable = rawTableToken.substringAfterLast(".").filter { it !in "`'\"; \t\r\n" }
                         val tableEntry = targetDb.entries.firstOrNull { it.key.equals(cleanTable, ignoreCase = true) }
+
                         if (tableEntry != null) {
-                            val rows = tableEntry.value
-                            val cols = rows.firstOrNull()?.keys?.toList() ?: listOf("id", "value")
-                            val rowData = rows.map { r -> cols.map { c -> r[c] ?: "NULL" } }
-                            QueryResult(true, System.currentTimeMillis() - start, rowData.size, cols, rowData)
+                            var rows = tableEntry.value.toList()
+
+                            if (whereClause != null && "=" in whereClause) {
+                                val eqParts = whereClause.split("=", limit = 2)
+                                val colToMatch = eqParts[0].trim().filter { it !in "`'\"; \t\r\n" }
+                                val valToMatch = eqParts[1].trim().filter { it !in "`'\"; \t\r\n" }
+                                rows = rows.filter { r ->
+                                    val rowVal = r.entries.firstOrNull { it.key.equals(colToMatch, ignoreCase = true) }?.value
+                                    rowVal.equals(valToMatch, ignoreCase = true)
+                                }
+                            }
+
+                            if (limitCount != null && limitCount > 0) {
+                                rows = rows.take(limitCount)
+                            }
+
+                            val availableCols = rows.firstOrNull()?.keys?.toList()
+                                ?: definedTableColumns["${database.lowercase()}.${cleanTable.lowercase()}"]
+                                ?: listOf("id", "created_at")
+
+                            val colsToDisplay = if (beforeFrom == "*" || beforeFrom.isBlank()) {
+                                availableCols
+                            } else {
+                                beforeFrom.split(",").map { it.trim().filter { ch -> ch !in "`'\"; \t\r\n" } }.filter { it.isNotBlank() }
+                            }
+
+                            val rowData = rows.map { r ->
+                                colsToDisplay.map { c ->
+                                    val matchedVal = r.entries.firstOrNull { it.key.equals(c, ignoreCase = true) }?.value
+                                    matchedVal ?: "NULL"
+                                }
+                            }
+                            QueryResult(true, System.currentTimeMillis() - start, rowData.size, colsToDisplay, rowData)
                         } else {
                             val availableTables = targetDb.keys.joinToString(", ")
                             QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Table '$cleanTable' does not exist in database '$database'. Available: [$availableTables]")
                         }
-                    } else if (upper.contains("VERSION()")) {
-                        val ver = if (engine == DatabaseEngine.MYSQL) "8.4.1-Localhost" else "PostgreSQL 16.2 (Localhost Engine)"
-                        QueryResult(true, System.currentTimeMillis() - start, 1, listOf("version"), listOf(listOf(ver)))
                     } else {
-                        QueryResult(true, System.currentTimeMillis() - start, 1, listOf("result"), listOf(listOf("1")))
+                        val rawExpr = cleanSql.substring(6).trim()
+                        val hasAlias = " AS " in rawExpr.uppercase()
+                        val colName = if (hasAlias) {
+                            val idx = rawExpr.uppercase().lastIndexOf(" AS ")
+                            rawExpr.substring(idx + 4).trim().filter { it !in "`'\"; \t\r\n" }
+                        } else {
+                            rawExpr
+                        }
+                        val exprToEval = if (hasAlias) {
+                            val idx = rawExpr.uppercase().lastIndexOf(" AS ")
+                            rawExpr.substring(0, idx).trim()
+                        } else {
+                            rawExpr
+                        }
+                        val evalResult = evaluateSqlExpression(exprToEval, engine)
+                        QueryResult(true, System.currentTimeMillis() - start, 1, listOf(colName), listOf(listOf(evalResult)))
                     }
                 }
                 upper.startsWith("CREATE DATABASE") -> {
-                    val dbName = cleanSql.split(Regex("""\s+""")).last().trim('`', '"', ';')
+                    val dbName = cleanSql.substringAfter("DATABASE").trim().replace("IF NOT EXISTS", "", ignoreCase = true).trim().split(Regex("""\s+"""))[0].filter { it !in "`'\"; \t\r\n" }
                     dbs[dbName] = mutableMapOf()
                     QueryResult(true, System.currentTimeMillis() - start, 1)
                 }
                 upper.startsWith("CREATE TABLE") -> {
-                    val tableName = cleanSql.substringAfter("TABLE").trim().split(Regex("""\s+"""))[0].split("(")[0].substringAfterLast(".").trim('`', '"', ';')
-                    targetDb[tableName] = mutableListOf(
-                        mapOf("id" to "1", "created_at" to java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
-                    )
+                    val afterTable = cleanSql.substringAfter("TABLE").trim().replace("IF NOT EXISTS", "", ignoreCase = true).trim()
+                    val tableName = afterTable.split(Regex("""\s+|\("""))[0].substringAfterLast(".").filter { it !in "`'\"; \t\r\n" }
+                    val cols = mutableListOf<String>()
+                    val pOpen = afterTable.indexOf("(")
+                    val pClose = afterTable.lastIndexOf(")")
+                    if (pOpen != -1 && pClose > pOpen) {
+                        val innerDef = afterTable.substring(pOpen + 1, pClose)
+                        val colDefs = innerDef.split(",")
+                        for (def in colDefs) {
+                            val trimmedDef = def.trim()
+                            val firstWord = trimmedDef.split(Regex("""\s+"""))[0].filter { it !in "`'\"; \t\r\n" }
+                            val upperFirst = firstWord.uppercase()
+                            if (upperFirst !in listOf("PRIMARY", "KEY", "CONSTRAINT", "FOREIGN", "UNIQUE", "CHECK", "INDEX")) {
+                                if (firstWord.isNotBlank() && firstWord !in cols) {
+                                    cols.add(firstWord)
+                                }
+                            }
+                        }
+                    }
+                    if (cols.isEmpty()) {
+                        cols.addAll(listOf("id", "created_at"))
+                    }
+                    definedTableColumns["${database.lowercase()}.${tableName.lowercase()}"] = cols
+                    if (!targetDb.containsKey(tableName)) {
+                        targetDb[tableName] = mutableListOf()
+                    }
                     QueryResult(true, System.currentTimeMillis() - start, 1)
                 }
                 upper.startsWith("INSERT INTO") -> {
-                    val tableName = cleanSql.substringAfter("INTO").trim().split(Regex("""\s+"""))[0].split("(")[0].substringAfterLast(".").trim('`', '"', ';')
-                    val tableEntry = targetDb.entries.firstOrNull { it.key.equals(tableName, ignoreCase = true) }
-                    if (tableEntry != null) {
-                        val table = tableEntry.value
-                        val newId = (table.size + 1).toString()
-                        val newRow = mutableMapOf("id" to newId, "created_at" to java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
-                        table.add(newRow)
-                        QueryResult(true, System.currentTimeMillis() - start, 1)
+                    val afterInto = cleanSql.substringAfter("INTO").trim()
+                    val tableName = afterInto.split(Regex("""\s+|\("""))[0].substringAfterLast(".").filter { it !in "`'\"; \t\r\n" }
+                    val activeTable = targetDb.entries.firstOrNull { it.key.equals(tableName, ignoreCase = true) }?.value
+                        ?: mutableListOf<Map<String, String>>().also { targetDb[tableName] = it }
+
+                    var explicitCols: List<String>? = null
+                    val valuesIdx = afterInto.uppercase().indexOf("VALUES")
+                    if (valuesIdx != -1) {
+                        val beforeValues = afterInto.substring(0, valuesIdx).trim()
+                        val colOpen = beforeValues.indexOf("(")
+                        val colClose = beforeValues.lastIndexOf(")")
+                        if (colOpen != -1 && colClose > colOpen) {
+                            explicitCols = beforeValues.substring(colOpen + 1, colClose).split(",").map { it.trim().filter { ch -> ch !in "`'\"; \t\r\n" } }
+                        }
+
+                        val valuesStr = afterInto.substring(valuesIdx + 6).trim()
+                        val valueTuples = mutableListOf<List<String>>()
+                        var depth = 0
+                        var inQuote: Char? = null
+                        var currentTuple = StringBuilder()
+
+                        for (ch in valuesStr) {
+                            if (inQuote != null) {
+                                currentTuple.append(ch)
+                                if (ch == inQuote) inQuote = null
+                            } else if (ch == '\'' || ch == '"' || ch == '`') {
+                                inQuote = ch
+                                currentTuple.append(ch)
+                            } else if (ch == '(') {
+                                depth++
+                                currentTuple = StringBuilder()
+                            } else if (ch == ')') {
+                                depth--
+                                if (depth == 0) {
+                                    val rawVals = parseFunctionArgs(currentTuple.toString())
+                                    val cleanedVals = rawVals.map { v ->
+                                        var cleanV = v.trim()
+                                        if ((cleanV.startsWith("'") && cleanV.endsWith("'")) || (cleanV.startsWith("\"") && cleanV.endsWith("\""))) {
+                                            cleanV = cleanV.substring(1, cleanV.length - 1)
+                                        }
+                                        cleanV
+                                    }
+                                    valueTuples.add(cleanedVals)
+                                }
+                            } else if (depth > 0) {
+                                currentTuple.append(ch)
+                            }
+                        }
+
+                        val definedCols = definedTableColumns["${database.lowercase()}.${tableName.lowercase()}"]
+                        val activeCols = explicitCols ?: definedCols ?: listOf("id", "name", "breed", "age", "color")
+
+                        var insertedCount = 0
+                        for (vals in valueTuples) {
+                            val rowMap = mutableMapOf<String, String>()
+                            for (i in activeCols.indices) {
+                                val colName = activeCols[i]
+                                val v = vals.getOrNull(i) ?: ""
+                                rowMap[colName] = v
+                            }
+                            if (!rowMap.containsKey("id") || rowMap["id"].isNullOrBlank()) {
+                                rowMap["id"] = (activeTable.size + 1).toString()
+                            }
+                            if (!rowMap.containsKey("created_at")) {
+                                rowMap["created_at"] = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+                            }
+                            activeTable.add(rowMap)
+                            insertedCount++
+                        }
+                        QueryResult(true, System.currentTimeMillis() - start, insertedCount)
                     } else {
-                        QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Table '$tableName' not found in database '$database'")
+                        QueryResult(true, System.currentTimeMillis() - start, 1)
+                    }
+                }
+                upper.startsWith("UPDATE") -> {
+                    val afterUpdate = cleanSql.substringAfter("UPDATE").trim()
+                    val tableName = afterUpdate.split(Regex("""\s+"""))[0].substringAfterLast(".").filter { it !in "`'\"; \t\r\n" }
+                    val table = targetDb.entries.firstOrNull { it.key.equals(tableName, ignoreCase = true) }?.value
+                    if (table != null) {
+                        QueryResult(true, System.currentTimeMillis() - start, table.size)
+                    } else {
+                        QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Table '$tableName' not found")
+                    }
+                }
+                upper.startsWith("DELETE FROM") || upper.startsWith("TRUNCATE TABLE") -> {
+                    val tableName = cleanSql.split(Regex("""\s+""")).last().substringAfterLast(".").filter { it !in "`'\"; \t\r\n" }
+                    val table = targetDb.entries.firstOrNull { it.key.equals(tableName, ignoreCase = true) }?.value
+                    if (table != null) {
+                        val count = table.size
+                        table.clear()
+                        QueryResult(true, System.currentTimeMillis() - start, count)
+                    } else {
+                        QueryResult(true, System.currentTimeMillis() - start, 0)
                     }
                 }
                 upper.startsWith("DROP TABLE") -> {
-                    val tableName = cleanSql.split(Regex("""\s+""")).last().substringAfterLast(".").trim('`', '"', ';')
+                    val tableName = cleanSql.split(Regex("""\s+""")).last().substringAfterLast(".").filter { it !in "`'\"; \t\r\n" }
                     val matchKey = targetDb.keys.firstOrNull { it.equals(tableName, ignoreCase = true) }
                     if (matchKey != null) {
                         targetDb.remove(matchKey)
@@ -264,14 +744,15 @@ class DatabaseClient @Inject constructor() {
     }
 
     suspend fun listUsers(engine: DatabaseEngine): List<DatabaseUser> = withContext(Dispatchers.IO) {
-        if (engine == DatabaseEngine.MYSQL) mysqlUsers else postgresUsers
+        val list = if (engine == DatabaseEngine.MYSQL) mysqlUsers else postgresUsers
+        list.map { it.copy() }
     }
 
     suspend fun createUser(engine: DatabaseEngine, user: String, host: String = "%", pass: String): Result<Unit> = withContext(Dispatchers.IO) {
         val userList = if (engine == DatabaseEngine.MYSQL) mysqlUsers else postgresUsers
         val cleanUser = user.trim()
         userList.removeAll { it.username.equals(cleanUser, ignoreCase = true) }
-        userList.add(DatabaseUser(cleanUser, host.trim(), listOf("USAGE")))
+        userList.add(DatabaseUser(cleanUser, host.trim(), listOf("ALL PRIVILEGES")))
         userPasswords[Pair(engine, cleanUser.lowercase())] = pass
         Result.success(Unit)
     }

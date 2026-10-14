@@ -33,16 +33,26 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import android.content.Context
+import androidx.compose.foundation.layout.PaddingValues
+
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,10 +60,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,6 +75,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -83,6 +92,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -125,6 +136,7 @@ fun DatabaseScreen(
     val allTableSchemas by viewModel.allTableSchemas.collectAsState()
     val queryResult by viewModel.queryResult.collectAsState()
     val users by viewModel.users.collectAsState()
+    val databaseLogs by viewModel.databaseLogs.collectAsState()
     val isExecuting by viewModel.isExecuting.collectAsState()
 
     val context = LocalContext.current
@@ -134,10 +146,9 @@ fun DatabaseScreen(
         uri?.let { viewModel.importSqlFile(context, it) }
     }
     var selectedTab by remember { mutableIntStateOf(0) }
-    var isConfigExpanded by remember { mutableStateOf(false) }
-    val tabs = listOf("Explorer", "Visualize", "Query Console", "Users & Perms", "Export Database")
+    val tabs = listOf("Dashboard", "Explorer", "Visualize", "Query Console", "Users & Perms", "Export Database", "Logs")
 
-    var sqlQueryInput by remember { mutableStateOf("SELECT * FROM users LIMIT 20;") }
+    var sqlQueryInput by remember { mutableStateOf("") }
     var showCreateUserDialog by remember { mutableStateOf(false) }
     var showChangePassDialog by remember { mutableStateOf<String?>(null) }
     var showDeleteUserDialog by remember { mutableStateOf<String?>(null) }
@@ -160,8 +171,8 @@ fun DatabaseScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -169,43 +180,15 @@ fun DatabaseScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Storage, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(24.dp))
-                    Column {
-                        Text("Database Studio", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text("Separate MySQL & PostgreSQL Services", fontSize = 11.sp, color = TextMuted)
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (activeConnected) StatusGreen.copy(alpha = 0.15f) else StatusRed.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, if (activeConnected) StatusGreen else StatusRed)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(if (activeConnected) StatusGreen else StatusRed)
-                        )
-                        Text(
-                            text = if (activeConnected) "Service Online" else "Offline",
-                            color = if (activeConnected) StatusGreen else StatusRed,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Icon(Icons.Default.Storage, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                    Text("Database Studio", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val isMySqlSel = selectedEngine == DatabaseEngine.MYSQL
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = if (isMySqlSel) PrimaryAccentContainer else DarkSurface,
                     border = BorderStroke(1.dp, if (isMySqlSel) PrimaryAccent else DarkBorder),
                     modifier = Modifier
@@ -213,7 +196,7 @@ fun DatabaseScreen(
                         .clickable { viewModel.selectService(DatabaseEngine.MYSQL) }
                 ) {
                     Row(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -224,15 +207,15 @@ fun DatabaseScreen(
                                 .background(if (isMysqlConnected) StatusGreen else StatusRed)
                         )
                         Column {
-                            Text("MySQL Service", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isMySqlSel) PrimaryAccent else TextPrimary)
-                            Text("Port 3306 | ${if (isMysqlConnected) "Active" else "Offline"}", fontSize = 10.sp, color = TextMuted)
+                            Text("MySQL", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isMySqlSel) PrimaryAccent else TextPrimary)
+                            Text("Port 3306 | ${if (isMysqlConnected) "Running" else "Stopped"}", fontSize = 10.sp, color = TextMuted)
                         }
                     }
                 }
 
                 val isPgSel = selectedEngine == DatabaseEngine.POSTGRESQL
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = if (isPgSel) PrimaryAccentContainer else DarkSurface,
                     border = BorderStroke(1.dp, if (isPgSel) PrimaryAccent else DarkBorder),
                     modifier = Modifier
@@ -240,7 +223,7 @@ fun DatabaseScreen(
                         .clickable { viewModel.selectService(DatabaseEngine.POSTGRESQL) }
                 ) {
                     Row(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -251,213 +234,9 @@ fun DatabaseScreen(
                                 .background(if (isPostgresConnected) StatusGreen else StatusRed)
                         )
                         Column {
-                            Text("PostgreSQL Service", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isPgSel) PrimaryAccent else TextPrimary)
-                            Text("Port 5432 | ${if (isPostgresConnected) "Active" else "Offline"}", fontSize = 10.sp, color = TextMuted)
+                            Text("PostgreSQL", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isPgSel) PrimaryAccent else TextPrimary)
+                            Text("Port 5432 | ${if (isPostgresConnected) "Running" else "Stopped"}", fontSize = 10.sp, color = TextMuted)
                         }
-                    }
-                }
-            }
-
-            Card(
-                shape = RoundedCornerShape(10.dp),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = BorderStroke(1.dp, if (activeConnected) PrimaryAccent.copy(alpha = 0.3f) else DarkBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.clickable { isConfigExpanded = !isConfigExpanded }
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (activeConnected) StatusGreen else StatusRed)
-                            )
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(
-                                        text = "${activeConfig.host}:${activeConfig.port}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
-                                    )
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = DarkSurfaceElevated,
-                                        border = BorderStroke(1.dp, DarkBorderSubtle)
-                                    ) {
-                                        Text(
-                                            text = activeConfig.user.ifBlank { "root" },
-                                            fontSize = 10.sp,
-                                            color = PrimaryAccent,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = if (isConfigExpanded) "Tap to hide configuration" else "Tap to edit credentials",
-                                    fontSize = 10.sp,
-                                    color = TextMuted
-                                )
-                            }
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(
-                                onClick = { viewModel.testConnection() },
-                                shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(1.dp, DarkBorder),
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                modifier = Modifier.height(30.dp)
-                            ) {
-                                Text("Test", fontSize = 11.sp, color = TextPrimary)
-                            }
-
-                            Button(
-                                onClick = {
-                                    if (activeConnected) viewModel.disconnect() else viewModel.connect()
-                                },
-                                shape = RoundedCornerShape(6.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (activeConnected) DarkSurfaceElevated else PrimaryAccent
-                                ),
-                                border = if (activeConnected) BorderStroke(1.dp, StatusRed) else null,
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                                modifier = Modifier.height(30.dp)
-                            ) {
-                                Text(
-                                    if (activeConnected) "Disconnect" else "Connect",
-                                    color = if (activeConnected) StatusRed else TextOnAccent,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { isConfigExpanded = !isConfigExpanded },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isConfigExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                    contentDescription = "Toggle Config",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    if (isConfigExpanded) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        HorizontalDivider(color = DarkBorderSubtle)
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = activeConfig.host,
-                                onValueChange = { viewModel.updateConfig(it, activeConfig.port, activeConfig.user, activeConfig.password, activeConfig.database) },
-                                label = { Text("Host", fontSize = 11.sp, color = TextMuted) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1.5f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary,
-                                    focusedBorderColor = PrimaryAccent,
-                                    unfocusedBorderColor = DarkBorderSubtle,
-                                    focusedContainerColor = DarkSurfaceElevated,
-                                    unfocusedContainerColor = DarkSurfaceElevated
-                                )
-                            )
-                            OutlinedTextField(
-                                value = activeConfig.port.toString(),
-                                onValueChange = { p -> p.toIntOrNull()?.let { viewModel.updateConfig(activeConfig.host, it, activeConfig.user, activeConfig.password, activeConfig.database) } },
-                                label = { Text("Port", fontSize = 11.sp, color = TextMuted) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary,
-                                    focusedBorderColor = PrimaryAccent,
-                                    unfocusedBorderColor = DarkBorderSubtle,
-                                    focusedContainerColor = DarkSurfaceElevated,
-                                    unfocusedContainerColor = DarkSurfaceElevated
-                                )
-                            )
-                        }
-
-                        var dbPasswordVisible by remember { mutableStateOf(false) }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = activeConfig.user,
-                                onValueChange = { viewModel.updateConfig(activeConfig.host, activeConfig.port, it, activeConfig.password, activeConfig.database) },
-                                label = { Text("User", fontSize = 11.sp, color = TextMuted) },
-                                placeholder = { Text("root", color = TextMuted, fontSize = 12.sp) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary,
-                                    focusedBorderColor = PrimaryAccent,
-                                    unfocusedBorderColor = DarkBorderSubtle,
-                                    focusedContainerColor = DarkSurfaceElevated,
-                                    unfocusedContainerColor = DarkSurfaceElevated
-                                )
-                            )
-                            OutlinedTextField(
-                                value = activeConfig.password,
-                                onValueChange = { viewModel.updateConfig(activeConfig.host, activeConfig.port, activeConfig.user, it, activeConfig.database) },
-                                label = { Text("Password", fontSize = 11.sp, color = TextMuted) },
-                                placeholder = { Text("None (null)", color = TextMuted, fontSize = 12.sp) },
-                                singleLine = true,
-                                visualTransformation = if (dbPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                trailingIcon = {
-                                    IconButton(
-                                        onClick = { dbPasswordVisible = !dbPasswordVisible },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (dbPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                            contentDescription = if (dbPasswordVisible) "Hide password" else "Show password",
-                                            tint = TextMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary,
-                                    focusedBorderColor = PrimaryAccent,
-                                    unfocusedBorderColor = DarkBorderSubtle,
-                                    focusedContainerColor = DarkSurfaceElevated,
-                                    unfocusedContainerColor = DarkSurfaceElevated
-                                )
-                            )
-                        }
-                    }
-
-                    activeMessage?.let { msg ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = msg,
-                            fontSize = 10.sp,
-                            color = if (activeConnected) StatusGreen else StatusRed,
-                            fontFamily = FontFamily.Monospace,
-                            lineHeight = 13.sp,
-                            maxLines = if (isConfigExpanded) 4 else 1
-                        )
                     }
                 }
             }
@@ -481,7 +260,7 @@ fun DatabaseScreen(
                             color = if (isSelected) PrimaryAccent else TextMuted,
                             fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                         )
                     }
                 }
@@ -489,59 +268,80 @@ fun DatabaseScreen(
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when (selectedTab) {
-                0 -> {
-                    ExplorerTab(
-                        databases = databases,
-                        selectedDb = selectedDb,
-                        tables = tables,
-                        selectedTable = selectedTable,
-                        tableSchema = tableSchema,
-                        tableData = tableData,
-                        onSelectDb = { viewModel.selectDatabase(it) },
-                        onSelectTable = { db, tbl -> viewModel.selectTable(db, tbl) },
-                        onRefresh = { viewModel.loadDatabases() }
-                    )
+                    0 -> {
+                        DatabaseDashboardTab(
+                            engine = selectedEngine,
+                            config = activeConfig,
+                            isConnected = activeConnected,
+                            statusMessage = activeMessage,
+                            databases = databases,
+                            users = users,
+                            onUpdateConfig = { h, p, u, pwd, db -> viewModel.updateConfig(h, p, u, pwd, db) },
+                            onStart = { viewModel.connect() },
+                            onStop = { viewModel.disconnect() },
+                            onRestart = { viewModel.restartService() },
+                            onTest = { viewModel.testConnection() }
+                        )
+                    }
+                    1 -> {
+                        ExplorerTab(
+                            databases = databases,
+                            selectedDb = selectedDb,
+                            tables = tables,
+                            selectedTable = selectedTable,
+                            tableSchema = tableSchema,
+                            tableData = tableData,
+                            onSelectDb = { viewModel.selectDatabase(it) },
+                            onSelectTable = { db, tbl -> viewModel.selectTable(db, tbl) },
+                            onRefresh = { viewModel.loadDatabases() }
+                        )
+                    }
+                    2 -> {
+                        VisualizeTab(
+                            databases = databases,
+                            selectedDb = selectedDb,
+                            allSchemas = allTableSchemas,
+                            onSelectDb = { viewModel.selectDatabase(it) },
+                            onRefresh = { viewModel.loadAllSchemas(selectedDb) }
+                        )
+                    }
+                    3 -> {
+                        QueryConsoleTab(
+                            query = sqlQueryInput,
+                            onQueryChange = { sqlQueryInput = it },
+                            onExecute = { viewModel.executeQuery(sqlQueryInput) },
+                            queryResult = queryResult,
+                            isExecuting = isExecuting
+                        )
+                    }
+                    4 -> {
+                        UsersTab(
+                            users = users,
+                            onCreateUser = { showCreateUserDialog = true },
+                            onChangePassword = { showChangePassDialog = it },
+                            onDeleteUser = { showDeleteUserDialog = it },
+                            onGrant = { showGrantDialog = it }
+                        )
+                    }
+                    5 -> {
+                        ExportDatabaseTab(
+                            databases = databases,
+                            selectedDb = selectedDb,
+                            onSelectDb = { viewModel.selectDatabase(it) },
+                            onExport = { db, includeData, share ->
+                                val sql = viewModel.generateSqlExport(db, includeData)
+                                viewModel.exportSqlToFile(context, db, sql, share)
+                            },
+                            onImport = { importSqlLauncher.launch("*/*") }
+                        )
+                    }
+                    6 -> {
+                        DatabaseLogsTab(
+                            logs = databaseLogs,
+                            onClearLogs = { viewModel.clearLogs() }
+                        )
+                    }
                 }
-                1 -> {
-                    VisualizeTab(
-                        databases = databases,
-                        selectedDb = selectedDb,
-                        allSchemas = allTableSchemas,
-                        onSelectDb = { viewModel.selectDatabase(it) },
-                        onRefresh = { viewModel.loadAllSchemas(selectedDb) }
-                    )
-                }
-                2 -> {
-                    QueryConsoleTab(
-                        query = sqlQueryInput,
-                        onQueryChange = { sqlQueryInput = it },
-                        onExecute = { viewModel.executeQuery(sqlQueryInput) },
-                        queryResult = queryResult,
-                        isExecuting = isExecuting
-                    )
-                }
-                3 -> {
-                    UsersTab(
-                        users = users,
-                        onCreateUser = { showCreateUserDialog = true },
-                        onChangePassword = { showChangePassDialog = it },
-                        onDeleteUser = { showDeleteUserDialog = it },
-                        onGrant = { showGrantDialog = it }
-                    )
-                }
-                4 -> {
-                    ExportDatabaseTab(
-                        databases = databases,
-                        selectedDb = selectedDb,
-                        onSelectDb = { viewModel.selectDatabase(it) },
-                        onExport = { db, includeData, share ->
-                            val sql = viewModel.generateSqlExport(db, includeData)
-                            viewModel.exportSqlToFile(context, db, sql, share)
-                        },
-                        onImport = { importSqlLauncher.launch("*/*") }
-                    )
-                }
-            }
             }
         }
     }
@@ -593,7 +393,7 @@ fun DatabaseScreen(
                     OutlinedTextField(
                         value = newHost,
                         onValueChange = { newHost = it },
-                        label = { Text("Host (%)", fontSize = 11.sp, color = TextMuted) },
+                        label = { Text("Host (% for any)", fontSize = 11.sp, color = TextMuted) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, focusedContainerColor = DarkSurface, unfocusedContainerColor = DarkSurface)
                     )
@@ -610,10 +410,10 @@ fun DatabaseScreen(
                 Button(
                     onClick = {
                         if (newUsername.isNotBlank()) {
-                            viewModel.createUser(newUsername, newHost, newPassword)
-                            showCreateUserDialog = false
+                            viewModel.createUser(newUsername.trim(), newHost.trim(), newPassword)
                             newUsername = ""
                             newPassword = ""
+                            showCreateUserDialog = false
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
@@ -634,30 +434,25 @@ fun DatabaseScreen(
             containerColor = DarkSurfaceElevated,
             title = { Text("Change Password for '$targetUser'", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter new password for $targetUser (leave empty for null password):", fontSize = 12.sp, color = TextSecondary)
-                    OutlinedTextField(
-                        value = changePasswordInput,
-                        onValueChange = { changePasswordInput = it },
-                        label = { Text("New Password", fontSize = 11.sp, color = TextMuted) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, focusedContainerColor = DarkSurface, unfocusedContainerColor = DarkSurface)
-                    )
-                }
+                OutlinedTextField(
+                    value = changePasswordInput,
+                    onValueChange = { changePasswordInput = it },
+                    label = { Text("New Password", fontSize = 11.sp, color = TextMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, focusedContainerColor = DarkSurface, unfocusedContainerColor = DarkSurface)
+                )
             },
             confirmButton = {
                 Button(
                     onClick = {
                         viewModel.changePassword(targetUser, changePasswordInput)
-                        showChangePassDialog = null
                         changePasswordInput = ""
-                        Toast.makeText(context, "Password updated for $targetUser", Toast.LENGTH_SHORT).show()
+                        showChangePassDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Save Password", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                    Text("Save", color = TextOnAccent, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -670,21 +465,20 @@ fun DatabaseScreen(
         AlertDialog(
             onDismissRequest = { showDeleteUserDialog = null },
             containerColor = DarkSurfaceElevated,
-            title = { Text("Delete User '$targetUser'", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+            title = { Text("Delete User '$targetUser'?", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 15.sp) },
             text = {
-                Text("Are you sure you want to permanently drop user '$targetUser' and revoke all permissions?", color = TextSecondary, fontSize = 13.sp)
+                Text("This will permanently remove the database user and revoke all privileges.", color = TextSecondary, fontSize = 13.sp)
             },
             confirmButton = {
                 Button(
                     onClick = {
                         viewModel.deleteUser(targetUser)
                         showDeleteUserDialog = null
-                        Toast.makeText(context, "User '$targetUser' dropped", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = StatusRed),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("Delete User", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                    Text("Delete", color = TextOnAccent, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -694,7 +488,13 @@ fun DatabaseScreen(
     }
 
     showGrantDialog?.let { targetUser ->
-        var selPrivileges by remember { mutableStateOf(listOf("SELECT", "INSERT")) }
+        val currentPrivs = users.firstOrNull { it.username.equals(targetUser, ignoreCase = true) }?.privileges
+        var selPrivileges by remember(targetUser) {
+            mutableStateOf(
+                if (targetUser.equals("root", ignoreCase = true)) listOf("ALL PRIVILEGES")
+                else currentPrivs ?: listOf("ALL PRIVILEGES")
+            )
+        }
         val allPrivs = listOf("SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALL PRIVILEGES")
         AlertDialog(
             onDismissRequest = { showGrantDialog = null },
@@ -735,6 +535,284 @@ fun DatabaseScreen(
 }
 
 @Composable
+private fun DatabaseDashboardTab(
+    engine: DatabaseEngine,
+    config: com.localhost.core.model.DatabaseConfig,
+    isConnected: Boolean,
+    statusMessage: String?,
+    databases: List<String>,
+    users: List<com.localhost.core.model.DatabaseUser>,
+    onUpdateConfig: (String, Int, String, String, String) -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onRestart: () -> Unit,
+    onTest: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, if (isConnected) StatusGreen.copy(alpha = 0.4f) else DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(if (isConnected) StatusGreen else StatusRed)
+                        )
+                        Column {
+                            Text(
+                                text = if (engine == DatabaseEngine.MYSQL) "MySQL Service" else "PostgreSQL Service",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Port ${config.port} • ${if (isConnected) "Active" else "Stopped"}",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isConnected) StatusGreen.copy(alpha = 0.15f) else StatusRed.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, if (isConnected) StatusGreen else StatusRed)
+                    ) {
+                        Text(
+                            text = if (isConnected) "ONLINE" else "STOPPED",
+                            color = if (isConnected) StatusGreen else StatusRed,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isConnected) {
+                        OutlinedButton(
+                            onClick = onStop,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
+                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Stop Service", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+
+                        Button(
+                            onClick = onRestart,
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restart", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    } else {
+                        Button(
+                            onClick = onStart,
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Start Service", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Connection & Credentials", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
+                    OutlinedButton(
+                        onClick = onTest,
+                        enabled = isConnected,
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, if (isConnected) DarkBorder else DarkBorder.copy(alpha = 0.3f)),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text("Test Connection", fontSize = 11.sp, color = if (isConnected) TextPrimary else TextMuted)
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = config.host,
+                        onValueChange = { onUpdateConfig(it, config.port, config.user, config.password, config.database) },
+                        label = { Text("Host", fontSize = 11.sp, color = TextMuted) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.5f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
+                        )
+                    )
+                    OutlinedTextField(
+                        value = config.port.toString(),
+                        onValueChange = { p -> p.toIntOrNull()?.let { onUpdateConfig(config.host, it, config.user, config.password, config.database) } },
+                        label = { Text("Port", fontSize = 11.sp, color = TextMuted) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
+                        )
+                    )
+                }
+
+                var dbPasswordVisible by remember { mutableStateOf(false) }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = config.user,
+                        onValueChange = { onUpdateConfig(config.host, config.port, it, config.password, config.database) },
+                        label = { Text("User", fontSize = 11.sp, color = TextMuted) },
+                        placeholder = { Text("root", color = TextMuted, fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
+                        )
+                    )
+                    OutlinedTextField(
+                        value = config.password,
+                        onValueChange = { onUpdateConfig(config.host, config.port, config.user, it, config.database) },
+                        label = { Text("Password", fontSize = 11.sp, color = TextMuted) },
+                        placeholder = { Text("None (null)", color = TextMuted, fontSize = 12.sp) },
+                        singleLine = true,
+                        visualTransformation = if (dbPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(
+                                onClick = { dbPasswordVisible = !dbPasswordVisible },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (dbPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (dbPasswordVisible) "Hide password" else "Show password",
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
+                        )
+                    )
+                }
+
+                statusMessage?.let { msg ->
+                    Text(
+                        text = msg,
+                        fontSize = 11.sp,
+                        color = if (isConnected) StatusGreen else StatusRed,
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = 14.sp
+                    )
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Service Telemetry & Stats", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = DarkSurfaceElevated,
+                        border = BorderStroke(1.dp, DarkBorderSubtle),
+                        modifier = Modifier.weight(1f).padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text("Databases", fontSize = 10.sp, color = TextMuted)
+                            Text("${databases.size}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
+                        }
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = DarkSurfaceElevated,
+                        border = BorderStroke(1.dp, DarkBorderSubtle),
+                        modifier = Modifier.weight(1f).padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text("Users", fontSize = 10.sp, color = TextMuted)
+                            Text("${users.size}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        }
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = DarkSurfaceElevated,
+                        border = BorderStroke(1.dp, DarkBorderSubtle),
+                        modifier = Modifier.weight(1f).padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text("Default DB", fontSize = 10.sp, color = TextMuted)
+                            Text("localhost_app", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ExplorerTab(
     databases: List<String>,
     selectedDb: String,
@@ -748,56 +826,110 @@ private fun ExplorerTab(
 ) {
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Databases:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-            databases.forEach { db ->
-                val isSel = db == selectedDb
+            var dbExpanded by remember { mutableStateOf(false) }
+            Box(modifier = Modifier.weight(1f)) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSel) PrimaryAccent else DarkSurfaceElevated,
-                    border = BorderStroke(1.dp, if (isSel) PrimaryAccent else DarkBorder),
-                    modifier = Modifier.clickable { onSelectDb(db) }
+                    shape = RoundedCornerShape(8.dp),
+                    color = DarkSurfaceElevated,
+                    border = BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier.fillMaxWidth().clickable { dbExpanded = true }
                 ) {
-                    Text(
-                        text = db,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSel) TextOnAccent else TextSecondary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Tables:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-            if (tables.isEmpty()) {
-                Text("No tables found", fontSize = 11.sp, color = TextMuted)
-            } else {
-                tables.forEach { tbl ->
-                    val isSel = tbl == selectedTable
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (isSel) PrimaryAccentContainer else DarkSurface,
-                        border = BorderStroke(1.dp, if (isSel) PrimaryAccent else DarkBorder),
-                        modifier = Modifier.clickable { onSelectTable(selectedDb, tbl) }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = tbl,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSel) PrimaryAccent else TextPrimary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        Column {
+                            Text("Database", fontSize = 9.sp, color = TextMuted)
+                            Text(selectedDb.ifBlank { "Select Database" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1)
+                        }
+                        Icon(Icons.Default.ExpandMore, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                    }
+                }
+                DropdownMenu(
+                    expanded = dbExpanded,
+                    onDismissRequest = { dbExpanded = false },
+                    modifier = Modifier.background(DarkSurfaceElevated).heightIn(max = 280.dp)
+                ) {
+                    databases.forEach { db ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = db,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (db == selectedDb) PrimaryAccent else TextPrimary
+                                )
+                            },
+                            onClick = {
+                                onSelectDb(db)
+                                dbExpanded = false
+                            }
                         )
                     }
                 }
+            }
+
+            var tableExpanded by remember { mutableStateOf(false) }
+            Box(modifier = Modifier.weight(1f)) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DarkSurfaceElevated,
+                    border = BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier.fillMaxWidth().clickable { tableExpanded = true }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Table", fontSize = 9.sp, color = TextMuted)
+                            Text(selectedTable ?: "Select Table", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (selectedTable != null) PrimaryAccent else TextMuted, maxLines = 1)
+                        }
+                        Icon(Icons.Default.ExpandMore, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                    }
+                }
+                DropdownMenu(
+                    expanded = tableExpanded,
+                    onDismissRequest = { tableExpanded = false },
+                    modifier = Modifier.background(DarkSurfaceElevated).heightIn(max = 280.dp)
+                ) {
+                    if (tables.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("No tables found", fontSize = 12.sp, color = TextMuted) },
+                            onClick = { tableExpanded = false }
+                        )
+                    } else {
+                        tables.forEach { tbl ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = tbl,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (tbl == selectedTable) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (tbl == selectedTable) PrimaryAccent else TextPrimary
+                                    )
+                                },
+                                onClick = {
+                                    onSelectTable(selectedDb, tbl)
+                                    tableExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = onRefresh,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = PrimaryAccent, modifier = Modifier.size(18.dp))
             }
         }
 
@@ -815,36 +947,39 @@ private fun ExplorerTab(
                     fontSize = 12.sp,
                     color = TextPrimary
                 )
-                IconButton(onClick = onRefresh, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
-                }
             }
 
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .background(DarkSurfaceElevated, RoundedCornerShape(8.dp))
-                    .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+                    .background(DarkSurface, RoundedCornerShape(8.dp))
+                    .border(BorderStroke(1.dp, DarkBorder), RoundedCornerShape(8.dp))
                     .horizontalScroll(rememberScrollState())
             ) {
-                LazyColumn(modifier = Modifier.padding(6.dp)) {
+                LazyColumn(modifier = Modifier.fillMaxSize().padding(6.dp)) {
                     item {
-                        Row(modifier = Modifier.background(PrimaryAccentContainer, RoundedCornerShape(4.dp)).padding(6.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .background(PrimaryAccentContainer, RoundedCornerShape(6.dp))
+                                .padding(vertical = 6.dp, horizontal = 8.dp)
+                        ) {
                             tableData.columns.forEach { col ->
                                 Text(
                                     text = col,
-                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
                                     color = PrimaryAccent,
-                                    modifier = Modifier.width(130.dp),
-                                    maxLines = 1
+                                    modifier = Modifier.width(130.dp)
                                 )
                             }
                         }
                     }
                     items(tableData.rows) { row ->
-                        Row(modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .padding(vertical = 4.dp, horizontal = 8.dp)
+                        ) {
                             row.forEach { cell ->
                                 Text(
                                     text = cell,
@@ -859,9 +994,59 @@ private fun ExplorerTab(
                     }
                 }
             }
+        } else if (selectedTable != null) {
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Schema for '${selectedTable}':",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = TextPrimary
+                )
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(tableSchema) { col ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = DarkSurface,
+                            border = BorderStroke(1.dp, DarkBorder),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (col.isPrimaryKey) {
+                                        Icon(Icons.Default.Key, contentDescription = "PK", tint = StatusOrange, modifier = Modifier.size(14.dp))
+                                    }
+                                    Column {
+                                        Text(col.name, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TextPrimary)
+                                        Text(col.type, fontSize = 10.sp, color = TextMuted)
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (col.isNullable) {
+                                        Surface(color = DarkSurfaceElevated, shape = RoundedCornerShape(4.dp)) {
+                                            Text("NULL", fontSize = 9.sp, color = TextMuted, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                        }
+                                    }
+                                    if (col.defaultValue != null) {
+                                        Surface(color = DarkSurfaceElevated, shape = RoundedCornerShape(4.dp)) {
+                                            Text("default: ${col.defaultValue}", fontSize = 9.sp, color = TextMuted, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         } else {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Select a table to view schema & records", color = TextMuted, fontSize = 12.sp)
+                Text("Select a database and table above to inspect schema and live rows", color = TextMuted, fontSize = 12.sp)
             }
         }
     }
@@ -879,51 +1064,61 @@ private fun VisualizeTab(
 
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Database:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-            databases.forEach { db ->
-                val isSel = db == selectedDb
+            var dbExpanded by remember { mutableStateOf(false) }
+            Box {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSel) PrimaryAccent else DarkSurfaceElevated,
-                    border = BorderStroke(1.dp, if (isSel) PrimaryAccent else DarkBorder),
-                    modifier = Modifier.clickable { onSelectDb(db) }
+                    shape = RoundedCornerShape(8.dp),
+                    color = DarkSurfaceElevated,
+                    border = BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier.clickable { dbExpanded = true }
                 ) {
-                    Text(
-                        text = db,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSel) TextOnAccent else TextSecondary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("Database: $selectedDb", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
+                        Icon(Icons.Default.ExpandMore, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                    }
+                }
+                DropdownMenu(
+                    expanded = dbExpanded,
+                    onDismissRequest = { dbExpanded = false },
+                    modifier = Modifier.background(DarkSurfaceElevated).heightIn(max = 280.dp)
+                ) {
+                    databases.forEach { db ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = db,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (db == selectedDb) PrimaryAccent else TextPrimary
+                                )
+                            },
+                            onClick = {
+                                onSelectDb(db)
+                                dbExpanded = false
+                            }
+                        )
+                    }
                 }
             }
-            Spacer(modifier = Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("FK Lines", fontSize = 10.sp, color = TextMuted)
                 Switch(
                     checked = showForeignKeys,
                     onCheckedChange = { showForeignKeys = it },
                     colors = SwitchDefaults.colors(checkedThumbColor = StatusOrange, checkedTrackColor = StatusOrange.copy(alpha = 0.3f))
                 )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(modifier = Modifier.size(16.dp, 3.dp).background(PrimaryAccent.copy(alpha = 0.6f)))
-                Text("DB Structure Line", fontSize = 10.sp, color = TextMuted)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(modifier = Modifier.size(16.dp, 3.dp).background(StatusOrange))
-                Text("Foreign Key Relation", fontSize = 10.sp, color = StatusOrange, fontWeight = FontWeight.Bold)
+                IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                }
             }
         }
 
@@ -931,54 +1126,82 @@ private fun VisualizeTab(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(DarkSurfaceElevated, RoundedCornerShape(10.dp))
-                .border(1.dp, DarkBorder, RoundedCornerShape(10.dp))
-                .verticalScroll(rememberScrollState())
-                .padding(12.dp)
+                .background(DarkSurface, RoundedCornerShape(8.dp))
+                .border(BorderStroke(1.dp, DarkBorder), RoundedCornerShape(8.dp))
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = PrimaryAccentContainer,
-                    border = BorderStroke(1.5.dp, PrimaryAccent),
-                    modifier = Modifier.padding(top = 4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Default.Storage, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(selectedDb, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = PrimaryAccent)
-                            Text("${allSchemas.size} Tables Total", fontSize = 10.sp, color = TextSecondary)
-                        }
-                    }
+            if (allSchemas.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No schema data available for '$selectedDb'.", color = TextMuted, fontSize = 12.sp)
                 }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .horizontalScroll(rememberScrollState())
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    val cardWidth = 200.dp
+                    val cardMargin = 20.dp
+                    val totalCards = allSchemas.size
+                    val totalCols = if (totalCards <= 2) totalCards else 2
+                    val totalRows = (totalCards + totalCols - 1) / totalCols
+                    val totalCanvasWidth = ((cardWidth + cardMargin) * totalCols) + 40.dp
+                    val totalCanvasHeight = (280.dp * totalRows) + 80.dp
 
-                if (allSchemas.isEmpty()) {
-                    Box(modifier = Modifier.height(150.dp), contentAlignment = Alignment.Center) {
-                        Text("No tables in '$selectedDb' to visualize", color = TextMuted, fontSize = 12.sp)
-                    }
-                } else {
-                    val chunks = allSchemas.chunked(2)
-                    chunks.forEach { rowTables ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowTables.forEach { tblEntry ->
-                                TableEntityCard(
-                                    entry = tblEntry,
-                                    modifier = Modifier.weight(1f)
-                                )
+                    Box(modifier = Modifier.size(totalCanvasWidth, totalCanvasHeight)) {
+                        if (showForeignKeys) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val colW = (cardWidth + cardMargin).toPx()
+                                val rowH = 280.dp.toPx()
+
+                                allSchemas.forEachIndexed { i, source ->
+                                    val srcCol = i % totalCols
+                                    val srcRow = i / totalCols
+                                    val srcX = 20.dp.toPx() + srcCol * colW + cardWidth.toPx()
+                                    val srcY = 20.dp.toPx() + srcRow * rowH + 40.dp.toPx()
+
+                                    allSchemas.forEachIndexed { j, target ->
+                                        if (i != j) {
+                                            val hasFk = source.columns.any { sc ->
+                                                target.columns.any { tc ->
+                                                    tc.isPrimaryKey && (sc.name.equals("${target.tableName}_id", ignoreCase = true) || (sc.name.equals("user_id", ignoreCase = true) && target.tableName.equals("users", ignoreCase = true)))
+                                                }
+                                            }
+
+                                            if (hasFk) {
+                                                val tgtCol = j % totalCols
+                                                val tgtRow = j / totalCols
+                                                val tgtX = 20.dp.toPx() + tgtCol * colW
+                                                val tgtY = 20.dp.toPx() + tgtRow * rowH + 40.dp.toPx()
+
+                                                drawLine(
+                                                    color = StatusOrange,
+                                                    start = Offset(srcX, srcY),
+                                                    end = Offset(tgtX, tgtY),
+                                                    strokeWidth = 2.5f,
+                                                    cap = StrokeCap.Round,
+                                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 6f), 0f)
+                                                )
+                                                drawCircle(
+                                                    color = StatusOrange,
+                                                    radius = 4f,
+                                                    center = Offset(tgtX, tgtY)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            if (rowTables.size == 1) {
-                                Spacer(modifier = Modifier.weight(1f))
+                        }
+
+                        allSchemas.forEachIndexed { idx, schemaEntry ->
+                            val col = idx % totalCols
+                            val row = idx / totalCols
+                            val leftPad = 20.dp + (cardWidth + cardMargin) * col
+                            val topPad = 20.dp + 280.dp * row
+
+                            Box(modifier = Modifier.padding(start = leftPad, top = topPad)) {
+                                TableEntityCard(schemaEntry = schemaEntry, modifier = Modifier.width(cardWidth))
                             }
                         }
                     }
@@ -989,39 +1212,36 @@ private fun VisualizeTab(
 }
 
 @Composable
-private fun TableEntityCard(
-    entry: TableSchemaEntry,
-    modifier: Modifier = Modifier
-) {
+private fun TableEntityCard(schemaEntry: TableSchemaEntry, modifier: Modifier = Modifier) {
     Card(
+        modifier = modifier,
         shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = BorderStroke(1.dp, DarkBorder),
-        modifier = modifier
+        colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+        border = BorderStroke(1.dp, DarkBorderSubtle)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(PrimaryAccentContainer)
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.Default.TableChart, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(14.dp))
-                    Text(entry.tableName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TextPrimary)
-                }
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = DarkSurfaceElevated
-                ) {
-                    Text("${entry.rowCount} rows", fontSize = 9.sp, color = TextMuted, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-                }
+                Icon(Icons.Default.TableChart, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(15.dp))
+                Text(
+                    text = schemaEntry.tableName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = PrimaryAccent,
+                    maxLines = 1
+                )
             }
 
             HorizontalDivider(color = DarkBorderSubtle)
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                entry.columns.forEach { col ->
-                    val isFk = col.name.endsWith("_id", ignoreCase = true) && !col.isPrimaryKey
+            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                schemaEntry.columns.forEach { col ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1029,22 +1249,22 @@ private fun TableEntityCard(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             if (col.isPrimaryKey) {
-                                Text("PK", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = StatusOrange)
-                            } else if (isFk) {
-                                Text("FK", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = StatusGreen)
+                                Icon(Icons.Default.Key, contentDescription = "PK", tint = StatusOrange, modifier = Modifier.size(11.dp))
                             }
                             Text(
                                 text = col.name,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = if (col.isPrimaryKey) FontWeight.Bold else FontWeight.Normal,
-                                color = if (col.isPrimaryKey) PrimaryAccent else if (isFk) StatusGreen else TextPrimary
+                                color = if (col.isPrimaryKey) TextPrimary else TextSecondary,
+                                maxLines = 1
                             )
                         }
                         Text(
-                            text = col.type.take(14),
-                            fontSize = 8.sp,
+                            text = col.type.lowercase(),
+                            fontSize = 9.sp,
+                            color = TextMuted,
                             fontFamily = FontFamily.Monospace,
-                            color = TextMuted
+                            maxLines = 1
                         )
                     }
                 }
@@ -1068,9 +1288,9 @@ private fun QueryConsoleTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val quickQueries = listOf(
+                "SELECT REPLACE(REPEAT('cat\\n', 25), '\\n', CHAR(10));",
                 "SELECT * FROM users LIMIT 20;",
                 "SELECT * FROM accounts;",
-                "SELECT * FROM metrics;",
                 "SELECT version();",
                 "SHOW TABLES;"
             )
@@ -1095,6 +1315,7 @@ private fun QueryConsoleTab(
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
+            placeholder = { Text("Enter SQL query (e.g. SELECT * FROM users)...", color = TextMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace) },
             modifier = Modifier.fillMaxWidth().height(90.dp),
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TextPrimary),
             shape = RoundedCornerShape(8.dp),
@@ -1139,14 +1360,14 @@ private fun QueryConsoleTab(
                         item {
                             Row(modifier = Modifier.background(PrimaryAccentContainer).padding(4.dp)) {
                                 res.columns.forEach { c ->
-                                    Text(c, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = PrimaryAccent, modifier = Modifier.width(120.dp))
+                                    Text(c, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = PrimaryAccent, modifier = Modifier.width(180.dp))
                                 }
                             }
                         }
                         items(res.rows) { r ->
                             Row(modifier = Modifier.padding(vertical = 3.dp, horizontal = 4.dp)) {
                                 r.forEach { cell ->
-                                    Text(cell, fontSize = 10.sp, color = TextSecondary, modifier = Modifier.width(120.dp))
+                                    Text(cell, fontSize = 10.sp, color = TextSecondary, modifier = Modifier.width(180.dp))
                                 }
                             }
                         }
@@ -1195,17 +1416,17 @@ private fun UsersTab(
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
             ) {
-                Icon(Icons.Default.Add, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(14.dp))
+                Icon(Icons.Default.Add, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Add User", fontSize = 11.sp, color = TextOnAccent, fontWeight = FontWeight.Bold)
+                Text("New User", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 11.sp)
             }
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(users) { u ->
-                Card(
+                Surface(
                     shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    color = DarkSurface,
                     border = BorderStroke(1.dp, DarkBorder)
                 ) {
                     Row(
@@ -1217,11 +1438,11 @@ private fun UsersTab(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(u.username, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
                                 Surface(shape = RoundedCornerShape(4.dp), color = DarkSurfaceElevated) {
-                                    Text(u.host, fontSize = 10.sp, color = TextMuted, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                    Text("@${u.host}", fontSize = 9.sp, color = TextMuted, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                                 }
                             }
                             Text(
-                                text = "Privileges: " + u.privileges.joinToString(", "),
+                                text = "Privileges: ${u.privileges.joinToString(", ")}",
                                 fontSize = 10.sp,
                                 color = TextSecondary,
                                 maxLines = 1
@@ -1229,14 +1450,16 @@ private fun UsersTab(
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(onClick = { onChangePassword(u.username) }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Key, contentDescription = "Change Password", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
-                            }
                             IconButton(onClick = { onGrant(u.username) }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Security, contentDescription = "Edit Permissions", tint = StatusOrange, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Security, contentDescription = "Grant", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
                             }
-                            IconButton(onClick = { onDeleteUser(u.username) }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete User", tint = StatusRed, modifier = Modifier.size(16.dp))
+                            IconButton(onClick = { onChangePassword(u.username) }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Key, contentDescription = "Password", tint = TextMuted, modifier = Modifier.size(16.dp))
+                            }
+                            if (u.username != "root") {
+                                IconButton(onClick = { onDeleteUser(u.username) }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = StatusRed, modifier = Modifier.size(16.dp))
+                                }
                             }
                         }
                     }
@@ -1275,24 +1498,45 @@ private fun ExportDatabaseTab(
                 )
 
                 Text("Select Target Database:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextMuted)
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    databases.forEach { db ->
-                        val isSel = db == selectedDb
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSel) PrimaryAccentContainer else DarkSurfaceElevated,
-                            border = BorderStroke(1.dp, if (isSel) PrimaryAccent else DarkBorder),
-                            modifier = Modifier.clickable { onSelectDb(db) }
+                var dbExpanded by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = DarkSurfaceElevated,
+                        border = BorderStroke(1.dp, DarkBorder),
+                        modifier = Modifier.fillMaxWidth().clickable { dbExpanded = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = db,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSel) PrimaryAccent else TextSecondary,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            Column {
+                                Text("Target Database", fontSize = 9.sp, color = TextMuted)
+                                Text(selectedDb, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
+                            }
+                            Icon(Icons.Default.ExpandMore, contentDescription = null, tint = TextMuted)
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = dbExpanded,
+                        onDismissRequest = { dbExpanded = false },
+                        modifier = Modifier.background(DarkSurfaceElevated).heightIn(max = 280.dp)
+                    ) {
+                        databases.forEach { db ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = db,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (db == selectedDb) PrimaryAccent else TextPrimary
+                                    )
+                                },
+                                onClick = {
+                                    onSelectDb(db)
+                                    dbExpanded = false
+                                }
                             )
                         }
                     }
@@ -1352,6 +1596,107 @@ private fun ExportDatabaseTab(
                         Icon(Icons.Default.Download, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Import .sql File into $selectedDb", color = StatusGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DatabaseLogsTab(
+    logs: List<String>,
+    onClearLogs: () -> Unit
+) {
+    val context = LocalContext.current
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) {
+            listState.animateScrollToItem(logs.size - 1)
+        }
+    }
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.Terminal, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                    Text("Database Activity Logs", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = PrimaryAccentContainer
+                    ) {
+                        Text("${logs.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("Database Logs", logs.joinToString("\n"))
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, DarkBorder),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Copy", fontSize = 11.sp, color = TextPrimary)
+                    }
+
+                    OutlinedButton(
+                        onClick = onClearLogs,
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f)),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Clear", fontSize = 11.sp, color = StatusRed)
+                    }
+                }
+            }
+
+            Surface(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                color = com.localhost.core.designsystem.theme.CodeBackground,
+                border = BorderStroke(1.dp, DarkBorderSubtle)
+            ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    items(logs) { logLine ->
+                        val logColor = when {
+                            logLine.contains("[ERROR]") || logLine.contains("[SQL-ERROR]") -> StatusRed
+                            logLine.contains("[WARN]") -> StatusOrange
+                            logLine.contains("[SQL]") -> PrimaryAccent
+                            logLine.contains("[SQL-RESULT]") || logLine.contains("[TEST]") || logLine.contains("SUCCESS") -> StatusGreen
+                            logLine.contains("[USER]") -> androidx.compose.ui.graphics.Color(0xFF67E8F9)
+                            else -> TextSecondary
+                        }
+                        SelectionContainer {
+                            Text(
+                                text = logLine,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp,
+                                color = logColor
+                            )
+                        }
                     }
                 }
             }

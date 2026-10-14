@@ -12,6 +12,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.platform.LocalDensity
+
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.FileOpen
@@ -1478,38 +1484,22 @@ fun FileEditorAndViewerScreen(
                         Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(file.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (fileType == FileType.TEXT && textInput.isNotBlank()) {
-                                    if (syntaxIssues.isEmpty()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = StatusGreen.copy(alpha = 0.15f),
-                                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.4f))
-                                        ) {
-                                            Text(
-                                                text = "✓ Valid",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = StatusGreen,
-                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    } else {
-                                        val first = syntaxIssues.first()
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = StatusRed.copy(alpha = 0.15f),
-                                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f))
-                                        ) {
-                                            Text(
-                                                text = "⚠ L${first.line}: ${first.message}",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = StatusRed,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                            )
-                                        }
+                                if (fileType == FileType.TEXT && textInput.isNotBlank() && syntaxIssues.isNotEmpty()) {
+                                    val first = syntaxIssues.first()
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = StatusRed.copy(alpha = 0.15f),
+                                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f))
+                                    ) {
+                                        Text(
+                                            text = "⚠ L${first.line}: ${first.message}",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = StatusRed,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
                                     }
                                 }
                             }
@@ -1797,6 +1787,11 @@ private fun CodeTextEditor(
     fileExtension: String = "",
     onTextChange: (String) -> Unit
 ) {
+    val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
+    val lineHeightPx = with(density) { 20.sp.toPx() }
+    var viewportHeightPx by remember { mutableStateOf(0) }
+
     val lines = remember(text) { text.lines().size.coerceAtLeast(1) }
     val lineNumbersText = remember(lines) { (1..lines).joinToString("\n") }
     val verticalScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
@@ -1808,6 +1803,40 @@ private fun CodeTextEditor(
     }
 
     var isUserTyping by remember { mutableStateOf(false) }
+
+    fun getCursorY(tfv: TextFieldValue): Float {
+        val cursorIndex = tfv.selection.end.coerceIn(0, tfv.text.length)
+        val lineIndex = tfv.text.take(cursorIndex).count { it == '\n' }
+        return lineIndex * lineHeightPx
+    }
+
+    fun ensureCursorVisible(tfv: TextFieldValue, animated: Boolean = false) {
+        if (viewportHeightPx <= 0) return
+        val cursorY = getCursorY(tfv)
+        val currentScroll = verticalScrollState.value
+        val visibleBottom = currentScroll + viewportHeightPx
+
+        val marginPx = (lineHeightPx * 2).toInt()
+        val cursorYInt = cursorY.toInt()
+        if (cursorYInt < currentScroll + marginPx || cursorYInt > visibleBottom - marginPx) {
+            val targetScroll = (cursorYInt - (viewportHeightPx / 3)).coerceIn(0, verticalScrollState.maxValue)
+            coroutineScope.launch {
+                if (animated) {
+                    verticalScrollState.animateScrollTo(targetScroll)
+                } else {
+                    verticalScrollState.scrollTo(targetScroll)
+                }
+            }
+        }
+    }
+
+    val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
+    LaunchedEffect(isImeVisible) {
+        if (isImeVisible) {
+            kotlinx.coroutines.delay(120)
+            ensureCursorVisible(textFieldValue, animated = true)
+        }
+    }
 
     LaunchedEffect(text) {
         if (!isUserTyping && textFieldValue.text != text) {
@@ -1827,7 +1856,12 @@ private fun CodeTextEditor(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(CodeBackground)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(CodeBackground)
+            .onSizeChanged { viewportHeightPx = it.height }
+    ) {
         if (suggestions.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -1895,6 +1929,7 @@ private fun CodeTextEditor(
                         val lastWord = tfv.text.takeLastWhile { it.isLetterOrDigit() || it == '_' }
                         currentWord = lastWord
                     }
+                    ensureCursorVisible(tfv, animated = false)
                     isUserTyping = false
                 },
                 visualTransformation = syntaxHighlighter,

@@ -47,6 +47,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.fillMaxSize
@@ -394,12 +396,13 @@ fun MainApp(sharedPayload: SharedIncomingPayload? = null, onDismissShared: () ->
             }
         }
     ) { padding ->
+        val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         NavHost(
             navController = navController,
             startDestination = Screen.Monitor.route,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = padding.calculateBottomPadding()),
+                .padding(bottom = if (showBottomBar) padding.calculateBottomPadding() else navBarBottom),
             enterTransition = { slideInHorizontally(initialOffsetX = { 300 }) + fadeIn() },
             exitTransition = { slideOutHorizontally(targetOffsetX = { -300 }) + fadeOut() },
             popEnterTransition = { slideInHorizontally(initialOffsetX = { -300 }) + fadeIn() },

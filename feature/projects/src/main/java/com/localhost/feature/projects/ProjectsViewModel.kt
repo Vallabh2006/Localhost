@@ -77,19 +77,18 @@ class ProjectsViewModel @Inject constructor(
     val tunnelError: StateFlow<String?> = tunnelManager.errorMessage
     val proxyConfig: StateFlow<NginxProxyConfig> = nginxManager.proxyConfig
 
-    fun startPortForwarding(targetPort: Int, forwardPort: Int) {
-        viewModelScope.launch {
-            val res = nginxManager.startProxy(targetPort = targetPort, httpsPort = forwardPort)
-            if (res.isSuccess) {
-                _message.value = "Port $targetPort forwarded to port $forwardPort"
-            } else {
-                _message.value = res.exceptionOrNull()?.message ?: "Failed to forward port"
-            }
-        }
+    private val _forwardedPort = MutableStateFlow<Int?>(null)
+    val forwardedPort: StateFlow<Int?> = _forwardedPort.asStateFlow()
+
+    fun startPortForwarding(port: Int) {
+        _forwardedPort.value = port
+        tunnelManager.startQuickTunnel(port)
+        _message.value = "Starting worldwide HTTPS tunnel for port $port..."
     }
 
     fun stopPortForwarding() {
-        nginxManager.stopProxy()
+        _forwardedPort.value = null
+        tunnelManager.stopTunnel()
         _message.value = "Port forwarding stopped"
     }
 

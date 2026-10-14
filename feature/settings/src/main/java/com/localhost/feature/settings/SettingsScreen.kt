@@ -557,7 +557,7 @@ private fun AboutSection() {
                     color = PrimaryAccentContainer,
                     border = BorderStroke(1.dp, PrimaryAccent)
                 ) {
-                    Text("v1.0.1", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    Text("v1.0.2", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
             }
 
@@ -631,7 +631,7 @@ private fun AboutSection() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Latest Changes in v1.0.1", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                Text("Latest Changes in v1.0.2", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
                 Icon(
                     if (showChangelog) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
@@ -649,11 +649,11 @@ private fun AboutSection() {
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val changelogItems = listOf(
-                            "Multi-Stack Architecture: Native isolated environments for Python, Node.js, PHP with Composer, Java OpenJDK, and Static HTML5 servers.",
-                            "Database Suite: Full MySQL and PostgreSQL server engines with database creation, user privileges, and live visual SQL console.",
-                            "Network & Cloudflare: Dedicated Cloudflare named tunnels with direct token authentication, port forwarding, and smart VPN detection.",
-                            "Persistent Terminals: Independent persistent terminal environments preserving shell history and sessions across navigation.",
-                            "Unified 5-Role Theme Engine: Configurable Primary, Secondary, Success, Fail, and Warn roles with real-time color wheel, shade slider, and Dark/Light mode presets."
+                            "VS Code Style Port Forwarding: Forward any local port directly to an internet-accessible public worldwide HTTPS link via Cloudflare Quick Tunnel with instant copy, browser launch, and QR code.",
+                            "Database Studio Enhancements: Services default to stopped; connection testing locked when offline; full SQL builtin function engine; empty default query input; instant user update refresh; dedicated Activity Logs tab.",
+                            "Editor Navigation & Cursor Stability: Removed valid tick badge; auto-scrolls viewport to cursor when scrolling and typing; eliminated scroll-to-top jump on keyboard appearance.",
+                            "Android Navigation Bar Insets: Proper insets padding for 3-button navigation bars across all screens without UI overlap.",
+                            "50ms Responsive Theme Customiser: 0.05-second real-time color wheel and shade slider update interval."
                         )
                         changelogItems.forEach { item ->
                             Row(
@@ -1237,7 +1237,7 @@ private fun ColorWheelCanvas(
                             currentSat = sat
 
                             val now = System.currentTimeMillis()
-                            if (now - lastUpdateTime >= 100L) {
+                            if (now - lastUpdateTime >= 50L) {
                                 lastUpdateTime = now
                                 val newHsv = floatArrayOf(currentHue, currentSat, currentVal)
                                 val colorInt = android.graphics.Color.HSVToColor(newHsv)
@@ -1321,7 +1321,7 @@ private fun ColorWheelCanvas(
                 onValueChange = { newShade ->
                     currentVal = newShade.coerceIn(0.05f, 1f)
                     val now = System.currentTimeMillis()
-                    if (now - lastShadeTime >= 100L || newShade <= 0.05f || newShade >= 0.99f) {
+                    if (now - lastShadeTime >= 50L || newShade <= 0.05f || newShade >= 0.99f) {
                         lastShadeTime = now
                         val newHsv = floatArrayOf(currentHue, currentSat, currentVal)
                         val colorInt = android.graphics.Color.HSVToColor(newHsv)
