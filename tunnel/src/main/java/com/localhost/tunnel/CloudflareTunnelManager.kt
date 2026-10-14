@@ -167,11 +167,15 @@ class CloudflareTunnelManager @Inject constructor(
                     }
                 }
 
+                var lastErrorOutput = ""
                 logReaderJob?.cancel()
                 logReaderJob = launch {
                     try {
                         BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
                             lines.forEach { line ->
+                                if (line.contains("error", ignoreCase = true) || line.contains("failed", ignoreCase = true) || line.contains("fatal", ignoreCase = true)) {
+                                    lastErrorOutput = line.take(180)
+                                }
                                 val urlMatch = Regex("""https://[a-zA-Z0-9-]+\.trycloudflare\.com""").find(line)
                                 if (urlMatch != null && !urlMatch.value.contains("api.trycloudflare.com")) {
                                     timeoutJob?.cancel()
@@ -189,7 +193,11 @@ class CloudflareTunnelManager @Inject constructor(
                     reconnectAttempts++
                     delay(2000L * reconnectAttempts)
                     startQuickTunnel(port)
-                } else if (_tunnelStatus.value == TunnelStatus.CONNECTED || _tunnelStatus.value == TunnelStatus.CONNECTING) {
+                } else if (_tunnelStatus.value == TunnelStatus.CONNECTING) {
+                    _tunnelStatus.value = TunnelStatus.ERROR
+                    _errorMessage.value = if (lastErrorOutput.isNotBlank()) lastErrorOutput else "Tunnel exited unexpectedly (code $exitCode). Ensure the project server is online."
+                    _activeUrl.value = ""
+                } else {
                     _tunnelStatus.value = TunnelStatus.DISCONNECTED
                     _activeUrl.value = ""
                 }
@@ -269,6 +277,9 @@ class CloudflareTunnelManager @Inject constructor(
                         reconnectAttempts++
                         delay(2000L * reconnectAttempts)
                         startNamedTunnel(token, tunnelId)
+                    } else if (_tunnelStatus.value == TunnelStatus.CONNECTING) {
+                        _tunnelStatus.value = TunnelStatus.ERROR
+                        _errorMessage.value = "Named tunnel failed to connect (code $exitCode). Check your token."
                     } else {
                         _tunnelStatus.value = TunnelStatus.DISCONNECTED
                     }

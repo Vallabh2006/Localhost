@@ -510,8 +510,19 @@ class ManagedProcess(
             try {
                 val escapedQuery = queryString.replace("\\", "\\\\").replace("'", "\\'")
                 val escapedBody = body.replace("\\", "\\\\").replace("'", "\\'")
-                val code = "parse_str('$escapedQuery', ${'$'}_GET);\n" +
-                        "parse_str('$escapedBody', ${'$'}_POST);\n" +
+                val code = "ob_start();\n" +
+                        "parse_str('$escapedQuery', ${'$'}_GET);\n" +
+                        "\${'$'}_rawB = '$escapedBody';\n" +
+                        "if (strpos(\${'$'}_rawB, '------') !== false || strpos(\${'$'}_rawB, 'Content-Disposition') !== false) {\n" +
+                        "    preg_match_all('/name=\"([^\"]+)\"(?:\\r?\\n){2}(.*?)(?:\\r?\\n-|$)/s', \${'$'}_rawB, \${'$'}_m);\n" +
+                        "    if (!empty(\${'$'}_m[1])) {\n" +
+                        "        for (\${'$'}_i = 0; \${'$'}_i < count(\${'$'}_m[1]); \${'$'}_i++) {\n" +
+                        "            ${'$'}_POST[\${'$'}_m[1][\${'$'}_i]] = trim(\${'$'}_m[2][\${'$'}_i]);\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "} else {\n" +
+                        "    parse_str(\${'$'}_rawB, ${'$'}_POST);\n" +
+                        "}\n" +
                         "${'$'}_REQUEST = array_merge(${'$'}_GET, ${'$'}_POST);\n" +
                         "${'$'}_SERVER['REQUEST_METHOD'] = '$method';\n" +
                         "${'$'}_SERVER['SERVER_PORT'] = '$port';\n" +
@@ -519,7 +530,8 @@ class ManagedProcess(
                         "${'$'}_SERVER['QUERY_STRING'] = '$escapedQuery';\n" +
                         "${'$'}_SERVER['SCRIPT_FILENAME'] = '${scriptFile.absolutePath}';\n" +
                         "chdir('${scriptFile.parentFile?.absolutePath ?: project.workingDir}');\n" +
-                        "include '${scriptFile.absolutePath}';"
+                        "include '${scriptFile.absolutePath}';\n" +
+                        "if (ob_get_level() > 0) ob_end_flush();"
 
                 val pb = ProcessBuilder(phpBinary.absolutePath, "-d", "display_errors=1", "-d", "memory_limit=256M", "-r", code)
                 pb.directory(File(project.workingDir))

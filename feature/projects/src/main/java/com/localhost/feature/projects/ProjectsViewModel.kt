@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Job
 import com.localhost.cli.LocalhostCli
 import okhttp3.OkHttpClient
@@ -223,7 +224,13 @@ class ProjectsViewModel @Inject constructor(
                 project
             }
 
-            val res = processSupervisor.startProject(actualProject)
+            val res = try {
+                withTimeoutOrNull(8000L) {
+                    processSupervisor.startProject(actualProject)
+                } ?: Result.failure(Exception("Startup timed out after 8s"))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
             if (res.isFailure) {
                 _message.value = res.exceptionOrNull()?.message ?: "Failed to start"
             }
@@ -232,7 +239,11 @@ class ProjectsViewModel @Inject constructor(
 
     fun stopProject(projectId: String) {
         viewModelScope.launch {
-            processSupervisor.stopProject(projectId)
+            try {
+                withTimeoutOrNull(5000L) {
+                    processSupervisor.stopProject(projectId)
+                }
+            } catch (_: Exception) {}
         }
     }
 
