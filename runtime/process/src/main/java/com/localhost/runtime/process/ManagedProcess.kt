@@ -67,7 +67,7 @@ class ManagedProcess(
         _status.value = ProjectStatus.STARTING
         launchTimeMs = System.currentTimeMillis()
 
-        if (project.runtime == RuntimeType.STATIC || executablePath == "builtin") {
+        if (project.runtime == RuntimeType.STATIC || project.runtime == RuntimeType.PHP || executablePath == "builtin") {
             startBuiltinServer()
             return
         }
@@ -672,12 +672,23 @@ class ManagedProcess(
         body: String,
         port: Int
     ): PhpExecutionResult {
-        val phpBinary = File(executablePath)
-        if (phpBinary.exists() && phpBinary.canExecute()) {
+        val phpBinary = listOf(
+            File(executablePath),
+            File(File(project.workingDir).parentFile?.parentFile ?: File(""), "runtimes/php/php"),
+            File("/data/data/com.localhost.app/files/runtimes/php/php"),
+            File("/data/user/0/com.localhost.app/files/runtimes/php/php")
+        ).firstOrNull { it.exists() && it.canExecute() }
+        if (phpBinary != null) {
             try {
+                val tmpDir = File(project.workingDir, ".tmp").apply { mkdirs() }
+                val runnerFile = File(tmpDir, "php_runner_${Thread.currentThread().id}.php")
                 val escapedQuery = queryString.replace("\\", "\\\\").replace("'", "\\'")
                 val escapedBody = body.replace("\\", "\\\\").replace("'", "\\'")
-                val code = "ini_set('display_errors', '0');\n" +
+                val scriptPath = scriptFile.absolutePath.replace("\\", "/")
+                val workDirPath = (scriptFile.parentFile?.absolutePath ?: project.workingDir).replace("\\", "/")
+
+                val code = "<?php\n" +
+                        "ini_set('display_errors', '0');\n" +
                         "ob_start();\n" +
                         "parse_str('$escapedQuery', \$_GET);\n" +
                         "\$_rawB = '$escapedBody';\n" +
@@ -696,10 +707,10 @@ class ManagedProcess(
                         "\$_SERVER['SERVER_PORT'] = '$port';\n" +
                         "\$_SERVER['SERVER_SOFTWARE'] = 'PHP/8.4 (Localhost Engine)';\n" +
                         "\$_SERVER['QUERY_STRING'] = '$escapedQuery';\n" +
-                        "\$_SERVER['SCRIPT_FILENAME'] = '${scriptFile.absolutePath}';\n" +
-                        "chdir('${scriptFile.parentFile?.absolutePath ?: project.workingDir}');\n" +
+                        "\$_SERVER['SCRIPT_FILENAME'] = '$scriptPath';\n" +
+                        "chdir('$workDirPath');\n" +
                         "try {\n" +
-                        "    include '${scriptFile.absolutePath}';\n" +
+                        "    include '$scriptPath';\n" +
                         "} catch (\\Throwable \$e) {\n" +
                         "    http_response_code(500);\n" +
                         "    echo \$e->getMessage();\n" +
@@ -711,15 +722,18 @@ class ManagedProcess(
                         "echo \"---LOCALHOST_PHP_HEADERS---\\n\";\n" +
                         "foreach (\$hdrs as \$h) { echo \$h . \"\\n\"; }\n" +
                         "echo \"---LOCALHOST_PHP_BODY---\\n\";\n" +
-                        "echo \$out;"
+                        "echo \$out;\n"
 
-                val pb = ProcessBuilder(phpBinary.absolutePath, "-d", "display_errors=0", "-d", "memory_limit=256M", "-r", code)
+                runnerFile.writeText(code, Charsets.UTF_8)
+
+                val pb = ProcessBuilder(phpBinary.absolutePath, "-d", "display_errors=0", "-d", "memory_limit=256M", runnerFile.absolutePath)
                 pb.directory(File(project.workingDir))
                 val env = pb.environment()
                 env.putAll(runtimeEnv)
                 val proc = pb.start()
                 val out = proc.inputStream.readBytes()
                 proc.waitFor()
+                try { runnerFile.delete() } catch (_: Exception) {}
                 if (out.isNotEmpty()) {
                     val text = String(out, Charsets.UTF_8)
                     val statusMarker = "---LOCALHOST_PHP_STATUS---\n"
