@@ -57,6 +57,21 @@ class CloudflareTunnelManager @Inject constructor(
         }
     }
 
+    private fun applyTunnelEnvironment(pb: ProcessBuilder) {
+        val env = pb.environment()
+        val certFile = File(context.filesDir, "runtimes/python/etc/tls/cert.pem")
+        val certifiFile = File(context.filesDir, "runtimes/python/lib/python3.14/site-packages/certifi/cacert.pem")
+        val pipCertFile = File(context.filesDir, "runtimes/python/lib/python3.14/site-packages/pip/_vendor/certifi/cacert.pem")
+        val activeCert = if (certFile.exists()) certFile else if (certifiFile.exists()) certifiFile else if (pipCertFile.exists()) pipCertFile else null
+        if (activeCert != null) {
+            env["SSL_CERT_FILE"] = activeCert.absolutePath
+            env["REQUESTS_CA_BUNDLE"] = activeCert.absolutePath
+            env["CURL_CA_BUNDLE"] = activeCert.absolutePath
+        }
+        env["HOME"] = context.filesDir.absolutePath
+        env["TMPDIR"] = context.cacheDir.absolutePath
+    }
+
     private fun buildDetachedCommand(vararg args: String): List<String> {
         val setsid = getSetsidPath()
         return if (setsid != null) {
@@ -138,6 +153,7 @@ class CloudflareTunnelManager @Inject constructor(
 
                 val pb = ProcessBuilder(command)
                 pb.redirectErrorStream(true)
+                applyTunnelEnvironment(pb)
                 val proc = pb.start()
                 tunnelProcess = proc
 
@@ -157,7 +173,7 @@ class CloudflareTunnelManager @Inject constructor(
                         BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
                             lines.forEach { line ->
                                 val urlMatch = Regex("""https://[a-zA-Z0-9-]+\.trycloudflare\.com""").find(line)
-                                if (urlMatch != null) {
+                                if (urlMatch != null && !urlMatch.value.contains("api.trycloudflare.com")) {
                                     timeoutJob?.cancel()
                                     _activeUrl.value = urlMatch.value
                                     _tunnelStatus.value = TunnelStatus.CONNECTED
@@ -214,6 +230,7 @@ class CloudflareTunnelManager @Inject constructor(
                 val command = buildDetachedCommand(*args.toTypedArray())
                 val pb = ProcessBuilder(command)
                 pb.redirectErrorStream(true)
+                applyTunnelEnvironment(pb)
                 val proc = pb.start()
                 tunnelProcess = proc
 

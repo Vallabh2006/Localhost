@@ -41,6 +41,7 @@ class SettingsRepository @Inject constructor(
         val TUNNEL_IS_QUICK = booleanPreferencesKey("tunnel_is_quick")
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val SAVED_TUNNEL_TOKENS = stringPreferencesKey("saved_tunnel_tokens")
+        val ACCENT_COLOR_NAME = stringPreferencesKey("accent_color_name")
     }
 
     val wakeLockEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.WAKE_LOCK_ENABLED] ?: true }
@@ -48,6 +49,11 @@ class SettingsRepository @Inject constructor(
     val wifiLockEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.WIFI_LOCK_ENABLED] ?: true }
     val wifiOnlyMode: Flow<Boolean> = context.dataStore.data.map { it[Keys.WIFI_ONLY_MODE] ?: false }
     val onboardingCompleted: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_COMPLETED] ?: false }
+    val accentColorName: Flow<String> = context.dataStore.data.map { it[Keys.ACCENT_COLOR_NAME] ?: "Indigo" }
+
+    suspend fun setAccentColorName(name: String) {
+        context.dataStore.edit { it[Keys.ACCENT_COLOR_NAME] = name }
+    }
 
     suspend fun setWakeLockEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.WAKE_LOCK_ENABLED] = enabled }
@@ -55,6 +61,16 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setVpnEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.VPN_ENABLED] = enabled }
+    }
+
+    fun isVpnDisabledForProject(projectId: String): Flow<Boolean> = context.dataStore.data.map {
+        it[booleanPreferencesKey("vpn_disabled_proj_" + projectId)] ?: false
+    }
+
+    suspend fun setVpnDisabledForProject(projectId: String, disabled: Boolean) {
+        context.dataStore.edit {
+            it[booleanPreferencesKey("vpn_disabled_proj_" + projectId)] = disabled
+        }
     }
 
     suspend fun setWifiLockEnabled(enabled: Boolean) {

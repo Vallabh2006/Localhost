@@ -36,6 +36,10 @@ class TunnelViewModel @Inject constructor(
     val tunnelConfig: StateFlow<TunnelConfig> = settingsRepository.getTunnelConfig()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TunnelConfig())
 
+    fun startQuickTunnel(targetPort: Int = 8080) {
+        tunnelManager.startQuickTunnel(targetPort)
+    }
+
     fun startNamedTunnel(token: String) {
         tunnelManager.startNamedTunnel(token)
     }

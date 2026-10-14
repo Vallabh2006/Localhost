@@ -96,6 +96,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -148,7 +149,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun FileExplorerScreen(
     initialProjectId: String? = null,
-    viewModel: FilesViewModel
+    projectId: String? = initialProjectId,
+    viewModel: FilesViewModel,
+    onBackClick: () -> Unit = {}
 ) {
     val projects by viewModel.projects.collectAsState()
     val selectedId by viewModel.selectedProjectId.collectAsState()
@@ -186,7 +189,7 @@ fun FileExplorerScreen(
 
     LaunchedEffect(initialProjectId, projects) {
         if (selectedId == null) {
-            val target = initialProjectId ?: projects.firstOrNull()?.id
+            val target = projectId ?: initialProjectId ?: projects.firstOrNull()?.id
             target?.let { viewModel.selectProject(it) }
         }
     }
@@ -205,6 +208,29 @@ fun FileExplorerScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { viewModel.importZip(context, it) }
+    }
+
+    BackHandler {
+        if (editingFile != null) {
+            viewModel.closeEditor()
+        } else if (showVcsSheet) {
+            showVcsSheet = false
+        } else if (showCreateDialog) {
+            showCreateDialog = false
+        } else if (renamingFile != null) {
+            renamingFile = null
+        } else if (detailsFile != null) {
+            detailsFile = null
+        } else if (fileToDelete != null) {
+            fileToDelete = null
+        } else {
+            val rootPath = currentProject?.let { File(it.workingDir).canonicalPath }
+            if (currentDir != null && rootPath != null && currentDir?.canonicalPath != rootPath) {
+                viewModel.navigateUp()
+            } else {
+                onBackClick()
+            }
+        }
     }
 
     if (!isLandscape && editingFile != null) {
@@ -231,7 +257,19 @@ fun FileExplorerScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("File Explorer", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                    Text("File Explorer", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimary)
+                },
+                navigationIcon = {
+                    IconButton(onClick = {
+                        val rootPath = currentProject?.let { File(it.workingDir).canonicalPath }
+                        if (currentDir != null && rootPath != null && currentDir?.canonicalPath != rootPath) {
+                            viewModel.navigateUp()
+                        } else {
+                            onBackClick()
+                        }
+                    }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                    }
                 },
                 actions = {
                     if (currentProject != null) {
@@ -243,8 +281,7 @@ fun FileExplorerScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface),
-                modifier = Modifier.height(48.dp)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
             )
         },
         floatingActionButton = {

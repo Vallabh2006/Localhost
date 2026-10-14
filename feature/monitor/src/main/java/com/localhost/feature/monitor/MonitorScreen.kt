@@ -1,4 +1,5 @@
 package com.localhost.feature.monitor
+import androidx.compose.foundation.layout.WindowInsets
 
 import android.content.res.Configuration
 import androidx.compose.foundation.background
@@ -92,13 +93,13 @@ fun MonitorScreen(
 
     Scaffold(
         containerColor = DarkBackground,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Server Monitor", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                    Text("Server Monitor", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimary)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface),
-                modifier = Modifier.height(48.dp)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
             )
         }
     ) { padding ->
@@ -232,7 +233,7 @@ fun MonitorScreen(
                     }
                 }
 
-                item { Spacer(modifier = Modifier.height(72.dp)) }
+                item { Spacer(modifier = Modifier.height(8.dp)) }
             }
         }
     }
@@ -458,15 +459,18 @@ private fun NetworkDiagnosticsCard(diagnostics: NetworkDiagnostics, stats: Syste
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Transport Type", color = TextMuted, fontSize = 13.sp)
-                Text(diagnostics.type.name, fontWeight = FontWeight.Medium, color = TextPrimary, fontSize = 13.sp)
+                Text("Local Endpoint", color = TextMuted, fontSize = 13.sp)
+                Text("http://${diagnostics.localIp ?: "127.0.0.1"}", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 13.sp)
             }
 
-            if (diagnostics.activeInterfaces.isNotEmpty()) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Interfaces", color = TextMuted, fontSize = 13.sp)
-                    Text(diagnostics.activeInterfaces.take(3).joinToString(separator = ", "), fontFamily = FontFamily.Monospace, color = TextSecondary, fontSize = 12.sp)
-                }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Network Mode", color = TextMuted, fontSize = 13.sp)
+                Text(if (diagnostics.isVpnActive) "VPN Encrypted Routing" else "Local LAN & Loopback", fontWeight = FontWeight.Medium, color = TextSecondary, fontSize = 13.sp)
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Dev Sockets", color = TextMuted, fontSize = 13.sp)
+                Text("0.0.0.0 (All Interfaces)", fontFamily = FontFamily.Monospace, color = TextSecondary, fontSize = 12.sp)
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -521,22 +525,22 @@ private fun ProjectMonitorCard(
                 if (isRunning) {
                     IconButton(
                         onClick = onRestart,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = PrimaryAccent, modifier = Modifier.size(22.dp))
                     }
                     IconButton(
                         onClick = onStop,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
-                        Icon(Icons.Default.Stop, contentDescription = "Stop", tint = StatusYellow, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Stop, contentDescription = "Stop", tint = StatusYellow, modifier = Modifier.size(24.dp))
                     }
                 } else {
                     IconButton(
                         onClick = onStart,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Start", tint = StatusGreen, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.PlayArrow, contentDescription = "Start", tint = StatusGreen, modifier = Modifier.size(24.dp))
                     }
                 }
             }

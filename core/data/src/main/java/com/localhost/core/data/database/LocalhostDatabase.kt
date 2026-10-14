@@ -8,9 +8,10 @@ import androidx.room.TypeConverters
     entities = [
         ProjectEntity::class,
         LogEntryEntity::class,
-        MetricSampleEntity::class
+        MetricSampleEntity::class,
+        RequestRecordEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -18,4 +19,5 @@ abstract class LocalhostDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
     abstract fun logDao(): LogDao
     abstract fun metricsDao(): MetricsDao
+    abstract fun requestRecordDao(): RequestRecordDao
 }

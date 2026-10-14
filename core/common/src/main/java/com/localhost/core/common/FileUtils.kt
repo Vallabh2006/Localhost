@@ -29,7 +29,6 @@ object FileUtils {
         return size
     }
 
-
     fun isSafePath(entryPath: String): Boolean {
         val normalized = entryPath.replace('\\', '/')
         if (normalized.startsWith("/")) return false

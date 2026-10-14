@@ -23,6 +23,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.localhost.core.data.database.RequestRecordDao
+import com.localhost.core.data.database.toEntity
+import com.localhost.core.data.repository.SettingsRepository
+import com.localhost.core.common.NetworkUtils
 
 @Singleton
 class ProcessSupervisor @Inject constructor(
@@ -30,11 +34,14 @@ class ProcessSupervisor @Inject constructor(
     private val projectRepository: ProjectRepository,
     private val logRepository: LogRepository,
     private val metricsRepository: MetricsRepository,
-    private val runtimeManager: RuntimeManager
+    private val runtimeManager: RuntimeManager,
+    private val requestRecordDao: RequestRecordDao,
+    private val settingsRepository: SettingsRepository
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val processes = ConcurrentHashMap<String, ManagedProcess>()
     private val crashRetryCounts = ConcurrentHashMap<String, AtomicInteger>()
+    private val vpnBlockedProjects = ConcurrentHashMap<String, Boolean>()
 
     private val _runningCount = MutableStateFlow(0)
     val runningCount = _runningCount.asStateFlow()
@@ -104,12 +111,30 @@ class ProcessSupervisor @Inject constructor(
 
         val env = runtimeManager.getEnvironmentForRuntime(actualProject.runtime)
 
+        scope.launch {
+            settingsRepository.isVpnDisabledForProject(actualProject.id).collect { disabled ->
+                vpnBlockedProjects[actualProject.id] = disabled
+            }
+        }
+
         val managed = ManagedProcess(
             project = actualProject,
             executablePath = execPath,
             runtimeEnv = env,
             logRepository = logRepository,
             scope = scope,
+            onRequestRecord = { record ->
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        requestRecordDao.insert(record.toEntity())
+                    } catch (_: Exception) {}
+                }
+            },
+            isVpnBlocked = {
+                val vpnActive = NetworkUtils.isVpnActive(context)
+                val disabled = vpnBlockedProjects[actualProject.id] ?: false
+                vpnActive && disabled
+            },
             onCrash = { crashedProc ->
                 handleCrash(crashedProc)
             }

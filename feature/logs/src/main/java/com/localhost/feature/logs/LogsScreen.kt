@@ -51,6 +51,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,8 +93,11 @@ import java.util.Locale
 @Composable
 fun LogsScreen(
     viewModel: LogsViewModel,
-    initialProjectId: String? = null
+    initialProjectId: String? = null,
+    projectId: String? = initialProjectId,
+    onBackClick: () -> Unit = {}
 ) {
+
     val context = LocalContext.current
     val projects by viewModel.projects.collectAsState()
     val selectedId by viewModel.selectedProjectId.collectAsState()
@@ -107,6 +111,15 @@ fun LogsScreen(
 
     var isSelectionMode by remember { mutableStateOf(false) }
     val selectedLogIds = remember { mutableStateListOf<Long>() }
+
+    BackHandler {
+        if (isSelectionMode) {
+            isSelectionMode = false
+            selectedLogIds.clear()
+        } else {
+            onBackClick()
+        }
+    }
     var menuExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialProjectId, projects) {
@@ -200,6 +213,11 @@ fun LogsScreen(
                                     .clip(CircleShape)
                                     .background(if (isLiveStreaming) StatusGreen else StatusYellow)
                             )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
                         }
                     },
                     actions = {

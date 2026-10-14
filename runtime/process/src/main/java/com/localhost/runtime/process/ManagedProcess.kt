@@ -7,6 +7,7 @@ import com.localhost.core.model.Project
 import com.localhost.core.model.ProjectStatus
 import com.localhost.core.model.RestartPolicy
 import com.localhost.core.model.RuntimeType
+import com.localhost.core.model.RequestRecord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +33,8 @@ class ManagedProcess(
     private val runtimeEnv: Map<String, String>,
     private val logRepository: LogRepository,
     private val scope: CoroutineScope,
+    private val onRequestRecord: ((RequestRecord) -> Unit)? = null,
+    private val isVpnBlocked: (() -> Boolean)? = null,
     private val onCrash: (ManagedProcess) -> Unit
 ) {
     private val _status = MutableStateFlow(ProjectStatus.STOPPED)
@@ -47,6 +50,7 @@ class ManagedProcess(
     private var stdoutJob: Job? = null
     private var stderrJob: Job? = null
     private var monitorJob: Job? = null
+    @Volatile
     private var isExplicitlyStopped = false
     private var launchTimeMs = 0L
 
@@ -65,7 +69,9 @@ class ManagedProcess(
                 val workDir = File(project.workingDir).apply { mkdirs() }
 
                 val commandParts = mutableListOf<String>()
-                if (project.startupCommand.isNotBlank()) {
+                if (project.runtime == RuntimeType.PHP && (project.startupCommand.isBlank() || project.startupCommand == "builtin")) {
+                    commandParts.addAll(listOf(executablePath, "-d", "max_execution_time=0", "-d", "memory_limit=512M", "-S", "0.0.0.0:${project.port}", "-t", workDir.absolutePath))
+                } else if (project.startupCommand.isNotBlank()) {
                     val parts = project.startupCommand.split("\\s+".toRegex()).filter { it.isNotBlank() }
                     if (parts.isNotEmpty()) {
                         val firstToken = parts[0]
@@ -98,7 +104,40 @@ class ManagedProcess(
                     }
                 }
 
-                val processBuilder = ProcessBuilder(commandParts.map { it.replace("\u0000", "").replace("\r", "").replace("\n", "").trim() }.filter { it.isNotBlank() })
+                val setsidPath = when {
+                    File("/system/bin/setsid").exists() -> "/system/bin/setsid"
+                    File("/bin/setsid").exists() -> "/bin/setsid"
+                    else -> null
+                }
+                val nohupPath = when {
+                    File("/system/bin/nohup").exists() -> "/system/bin/nohup"
+                    File("/bin/nohup").exists() -> "/bin/nohup"
+                    else -> null
+                }
+
+                val finalCommand = mutableListOf<String>()
+                if (setsidPath != null) {
+                    finalCommand.add(setsidPath)
+                    finalCommand.add("-w")
+                }
+                if (nohupPath != null) {
+                    finalCommand.add(nohupPath)
+                }
+                if (project.runtime == RuntimeType.PYTHON && commandParts.isNotEmpty() && (commandParts[0] == "python" || commandParts[0] == "python3")) {
+                    val projectVenv = listOf(
+                        File(workDir, ".venv"),
+                        File(workDir, "myenv"),
+                        File(workDir, "venv")
+                    ).firstOrNull { File(it, "bin/python").exists() }
+                    val venvPy = projectVenv?.let { File(it, "bin/python") }
+                    val pyExec = if (venvPy != null && venvPy.exists()) venvPy.absolutePath else executablePath
+                    finalCommand.add(pyExec)
+                    finalCommand.addAll(commandParts.drop(1).map { it.trim() }.filter { it.isNotBlank() })
+                } else {
+                    finalCommand.addAll(commandParts.map { it.trim() }.filter { it.isNotBlank() })
+                }
+
+                val processBuilder = ProcessBuilder(finalCommand)
                 processBuilder.directory(workDir)
 
                 val env = processBuilder.environment()
@@ -109,7 +148,15 @@ class ManagedProcess(
                 env["TMPDIR"] = File(workDir, ".tmp").apply { mkdirs() }.absolutePath
 
                 if (project.runtime == RuntimeType.PYTHON) {
-                    val projectVenv = File(workDir, ".venv")
+                    val projectVenv = listOf(
+                        File(workDir, ".venv"),
+                        File(workDir, "myenv"),
+                        File(workDir, "venv")
+                    ).firstOrNull { File(it, "bin/python").exists() } ?: File(workDir, ".venv")
+                    val venvBin = File(projectVenv, "bin")
+                    val curPath = env["PATH"] ?: (System.getenv("PATH") ?: "/system/bin")
+                    env["PATH"] = "${venvBin.absolutePath}:$curPath"
+                    env["VIRTUAL_ENV"] = projectVenv.absolutePath
                     val projectSitePackages = File(projectVenv, "lib/python/site-packages")
                     val projectSitePackages312 = File(projectVenv, "lib/python3.12/site-packages")
                     val projectSitePackages314 = File(projectVenv, "lib/python3.14/site-packages")
@@ -170,12 +217,47 @@ class ManagedProcess(
 
                 logRepository.append(project.id, LogStream.SYSTEM, "Process started with PID ${_pid.value ?: "unknown"} on port ${project.port}")
 
+                val httpRegex = Regex("""(?:"|')?(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^ "'\?]+)(?:\?[^ "']*)?(?:\s+HTTP/[0-9.]+)?["']?\s+(\d{3})""", RegexOption.IGNORE_CASE)
+                val phpRegex = Regex("""\[(\d{3})\]:\s+(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^ \n]+)""", RegexOption.IGNORE_CASE)
+                val uvicornRegex = Regex("""(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^ "'\?]+).*?(\d{3})""", RegexOption.IGNORE_CASE)
+
+                fun parseLine(line: String) {
+                    val httpMatch = httpRegex.find(line)
+                    if (httpMatch != null) {
+                        val m = httpMatch.groupValues[1].uppercase()
+                        val p = httpMatch.groupValues[2]
+                        val code = httpMatch.groupValues[3].toIntOrNull() ?: 200
+                        onRequestRecord?.invoke(RequestRecord(projectId = project.id, timestamp = System.currentTimeMillis(), method = m, path = p, statusCode = code, responseBytes = 0L, durationMs = 5L, errorMessage = if (code >= 400) "HTTP $code" else null))
+                        return
+                    }
+                    val phpMatch = phpRegex.find(line)
+                    if (phpMatch != null) {
+                        val code = phpMatch.groupValues[1].toIntOrNull() ?: 200
+                        val m = phpMatch.groupValues[2].uppercase()
+                        val p = phpMatch.groupValues[3]
+                        onRequestRecord?.invoke(RequestRecord(projectId = project.id, timestamp = System.currentTimeMillis(), method = m, path = p, statusCode = code, responseBytes = 0L, durationMs = 5L, errorMessage = if (code >= 400) "HTTP $code" else null))
+                        return
+                    }
+                    val uvicornMatch = uvicornRegex.find(line)
+                    if (uvicornMatch != null) {
+                        val m = uvicornMatch.groupValues[1].uppercase()
+                        val p = uvicornMatch.groupValues[2]
+                        val code = uvicornMatch.groupValues[3].toIntOrNull() ?: 200
+                        onRequestRecord?.invoke(RequestRecord(projectId = project.id, timestamp = System.currentTimeMillis(), method = m, path = p, statusCode = code, responseBytes = 0L, durationMs = 5L, errorMessage = if (code >= 400) "HTTP $code" else null))
+                        return
+                    }
+                    if (line.contains("error", ignoreCase = true) || line.contains("exception", ignoreCase = true) || line.contains("traceback", ignoreCase = true)) {
+                        onRequestRecord?.invoke(RequestRecord(projectId = project.id, timestamp = System.currentTimeMillis(), method = "ERR", path = "/server", statusCode = 500, responseBytes = 0L, durationMs = 0L, errorMessage = line.take(160)))
+                    }
+                }
+
                 stdoutJob = launch(Dispatchers.IO) {
                     val reader = BufferedReader(InputStreamReader(proc.inputStream))
                     try {
                         while (isActive) {
                             val line = reader.readLine() ?: break
                             logRepository.append(project.id, LogStream.STDOUT, line)
+                            parseLine(line)
                         }
                     } catch (_: Exception) {}
                 }
@@ -186,6 +268,7 @@ class ManagedProcess(
                         while (isActive) {
                             val line = reader.readLine() ?: break
                             logRepository.append(project.id, LogStream.STDERR, line)
+                            parseLine(line)
                         }
                     } catch (_: Exception) {}
                 }
@@ -201,21 +284,28 @@ class ManagedProcess(
                     if (isExplicitlyStopped) {
                         _status.value = ProjectStatus.STOPPED
                         logRepository.append(project.id, LogStream.SYSTEM, "Server stopped gracefully (exit code $exitCode)")
+                    } else if (exitCode == 143 || exitCode == 137 || exitCode == 0) {
+                        _status.value = ProjectStatus.STOPPED
+                        logRepository.append(project.id, LogStream.SYSTEM, "Server stopped (exit code $exitCode)")
                     } else {
                         logRepository.append(project.id, LogStream.SYSTEM, "Process exited with code $exitCode (ran for ${runtimeDuration}ms)")
                         if (exitCode != 0) {
-                            if (runtimeDuration < 4000L) {
+                            if (exitCode == 159) {
+                                if ((project.restartPolicy == RestartPolicy.ALWAYS || project.restartPolicy == RestartPolicy.ON_CRASH) && retryCount < 5) {
+                                    retryCount++
+                                    _status.value = ProjectStatus.RESTARTING
+                                    delay(1000)
+                                    onCrash(this@ManagedProcess)
+                                } else {
+                                    _status.value = ProjectStatus.STOPPED
+                                }
+                            } else if (runtimeDuration < 4000L) {
                                 _status.value = ProjectStatus.CRASHED
                                 logRepository.append(project.id, LogStream.SYSTEM, "Process crashed immediately on startup (code $exitCode). Auto-restart disabled to prevent looping. Check stderr logs.")
-                            } else if (project.restartPolicy == RestartPolicy.ALWAYS && retryCount < 2) {
+                            } else if ((project.restartPolicy == RestartPolicy.ALWAYS || project.restartPolicy == RestartPolicy.ON_CRASH) && retryCount < 3) {
                                 retryCount++
                                 _status.value = ProjectStatus.RESTARTING
-                                delay(3000)
-                                onCrash(this@ManagedProcess)
-                            } else if (project.restartPolicy == RestartPolicy.ON_CRASH && retryCount < 2) {
-                                retryCount++
-                                _status.value = ProjectStatus.RESTARTING
-                                delay(3000)
+                                delay(2000)
                                 onCrash(this@ManagedProcess)
                             } else {
                                 _status.value = ProjectStatus.CRASHED
@@ -245,7 +335,10 @@ class ManagedProcess(
             var boundPort = targetPort
 
             try {
-                server = ServerSocket(boundPort)
+                server = ServerSocket().apply {
+                    reuseAddress = true
+                    bind(java.net.InetSocketAddress(boundPort))
+                }
             } catch (e: Exception) {
                 try {
                     val fallbackPort = when (project.runtime) {
@@ -255,7 +348,10 @@ class ManagedProcess(
                     }
                     if (fallbackPort != boundPort) {
                         boundPort = fallbackPort
-                        server = ServerSocket(boundPort)
+                        server = ServerSocket().apply {
+                            reuseAddress = true
+                            bind(java.net.InetSocketAddress(boundPort))
+                        }
                     } else {
                         throw e
                     }
@@ -360,9 +456,8 @@ class ManagedProcess(
                 }
 
                 if (requestedFile.extension.lowercase() == "php") {
-                    val rawPhp = requestedFile.readText()
-                    val rendered = renderPhpTemplate(rawPhp, port)
-                    val bytes = rendered.toByteArray(Charsets.UTF_8)
+                    val query = if (pathWithQuery.contains("?")) pathWithQuery.substringAfter("?") else ""
+                    val bytes = executePhpScript(requestedFile, method, query, body, port)
                     val resp = "HTTP/1.1 200 OK\r\n" +
                             "Content-Type: $mime\r\n" +
                             "Content-Length: ${bytes.size}\r\n" +
@@ -403,6 +498,49 @@ class ManagedProcess(
         return res.toString(2)
     }
 
+    private fun executePhpScript(
+        scriptFile: File,
+        method: String,
+        queryString: String,
+        body: String,
+        port: Int
+    ): ByteArray {
+        val phpBinary = File(executablePath)
+        if (phpBinary.exists() && phpBinary.canExecute()) {
+            try {
+                val escapedQuery = queryString.replace("\\", "\\\\").replace("'", "\\'")
+                val escapedBody = body.replace("\\", "\\\\").replace("'", "\\'")
+                val code = "parse_str('$escapedQuery', ${'$'}_GET);\n" +
+                        "parse_str('$escapedBody', ${'$'}_POST);\n" +
+                        "${'$'}_REQUEST = array_merge(${'$'}_GET, ${'$'}_POST);\n" +
+                        "${'$'}_SERVER['REQUEST_METHOD'] = '$method';\n" +
+                        "${'$'}_SERVER['SERVER_PORT'] = '$port';\n" +
+                        "${'$'}_SERVER['SERVER_SOFTWARE'] = 'PHP/8.4.1 (Localhost Engine)';\n" +
+                        "${'$'}_SERVER['QUERY_STRING'] = '$escapedQuery';\n" +
+                        "${'$'}_SERVER['SCRIPT_FILENAME'] = '${scriptFile.absolutePath}';\n" +
+                        "chdir('${scriptFile.parentFile?.absolutePath ?: project.workingDir}');\n" +
+                        "include '${scriptFile.absolutePath}';"
+
+                val pb = ProcessBuilder(phpBinary.absolutePath, "-d", "display_errors=1", "-d", "memory_limit=256M", "-r", code)
+                pb.directory(File(project.workingDir))
+                val env = pb.environment()
+                env.putAll(runtimeEnv)
+                val proc = pb.start()
+                val out = proc.inputStream.readBytes()
+                val err = proc.errorStream.readBytes()
+                proc.waitFor()
+                if (out.isNotEmpty()) {
+                    return out
+                }
+                if (err.isNotEmpty()) {
+                    return err
+                }
+            } catch (_: Exception) {}
+        }
+        val rawPhp = scriptFile.readText()
+        return renderPhpTemplate(rawPhp, port).toByteArray(Charsets.UTF_8)
+    }
+
     private fun renderPhpTemplate(content: String, port: Int): String {
         val now = Date()
         val timeFmt = SimpleDateFormat("HH:mm:ss z", Locale.getDefault()).format(now)
@@ -411,8 +549,8 @@ class ManagedProcess(
 
         var result = content
         result = result.replace("<?php echo phpversion(); ?>", "8.4.1 (Localhost Engine)")
-        result = result.replace("<?php echo \$_SERVER['SERVER_SOFTWARE'] ?? 'PHP CLI'; ?>", "Localhost Server (Android)")
-        result = result.replace("<?php echo \$_SERVER['SERVER_PORT'] ?? '8000'; ?>", port.toString())
+        result = result.replace("<?php echo ${'$'}_SERVER['SERVER_SOFTWARE'] ?? 'PHP CLI'; ?>", "Localhost Server (Android)")
+        result = result.replace("<?php echo ${'$'}_SERVER['SERVER_PORT'] ?? '8000'; ?>", port.toString())
         result = result.replace("<?php echo date('H:i:s T'); ?>", timeFmt)
         val phpBanner = "Hello from PHP on Localhost Mobile VPS!\n" +
                         "Current Date: " + dateFmt + "\n" +
@@ -427,6 +565,7 @@ class ManagedProcess(
     suspend fun stop() = withContext(Dispatchers.IO) {
         isExplicitlyStopped = true
         _status.value = ProjectStatus.STOPPING
+        monitorJob?.cancel()
 
         try {
             staticServerSocket?.close()

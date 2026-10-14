@@ -1,5 +1,8 @@
 package com.localhost.feature.projects
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -11,7 +14,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
@@ -82,7 +85,13 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -111,6 +120,18 @@ import androidx.core.content.FileProvider
 import com.localhost.core.common.NetworkUtils
 import com.localhost.core.common.QrCodeGenerator
 import com.localhost.core.designsystem.component.StatusChip
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import com.localhost.core.designsystem.theme.CodeBackground
 import com.localhost.core.designsystem.theme.DarkBackground
 import com.localhost.core.designsystem.theme.DarkBorder
 import com.localhost.core.designsystem.theme.DarkBorderSubtle
@@ -148,6 +169,9 @@ fun ProjectDetailScreen(
 ) {
     val projects by viewModel.projects.collectAsState()
     val message by viewModel.message.collectAsState()
+    val tunnelStatus by viewModel.tunnelStatus.collectAsState()
+    val activeTunnelUrl by viewModel.activeTunnelUrl.collectAsState()
+    val tunnelError by viewModel.tunnelError.collectAsState()
     val project = projects.firstOrNull { it.id == projectId }
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -156,7 +180,27 @@ fun ProjectDetailScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var qrDialogUrl by remember { mutableStateOf<String?>(null) }
-    val tabs = listOf("Overview", "Snapshots", "Packages", "Control")
+    var browserPreviewUrl by remember { mutableStateOf<String?>(null) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+
+    BackHandler {
+        if (browserPreviewUrl != null) {
+            browserPreviewUrl = null
+        } else if (showEditDialog) {
+            showEditDialog = false
+        } else if (showDeleteDialog) {
+            showDeleteDialog = false
+        } else if (qrDialogUrl != null) {
+            qrDialogUrl = null
+        } else if (selectedTab > 0) {
+            selectedTab = 0
+        } else {
+            onBackClick()
+        }
+    }
+    val tabs = listOf("Overview", "Logs & Terminal", "Analytics", "Snapshots", "Packages", "Control")
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -166,9 +210,6 @@ fun ProjectDetailScreen(
             viewModel.clearMessage()
         }
     }
-
-    var showEditDialog by remember { mutableStateOf(false) }
-    var isExporting by remember { mutableStateOf(false) }
 
     fun shareExportedZip() {
         if (project == null) return
@@ -199,6 +240,7 @@ fun ProjectDetailScreen(
     if (project == null) {
         Scaffold(
             containerColor = DarkBackground,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopAppBar(
                     title = { Text("Project", color = TextPrimary) },
@@ -225,76 +267,110 @@ fun ProjectDetailScreen(
 
     Scaffold(
         containerColor = DarkBackground,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text(project.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimary)
+                        Text(
+                            project.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Text(project.runtime.displayName, fontSize = 12.sp, color = TextSecondary)
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = {
+                        if (selectedTab > 0) selectedTab = 0 else onBackClick()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
                     }
                 },
                 actions = {
                     if (project.status == ProjectStatus.RUNNING) {
                         IconButton(onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.stopProject(project.id)
                         }) {
                             Icon(Icons.Default.Stop, contentDescription = "Stop", tint = StatusRed)
                         }
                         IconButton(onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.restartProject(project.id)
                         }) {
                             Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = PrimaryAccent)
                         }
-                        IconButton(onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
-                            qrDialogUrl = "http://$ip:${project.port}"
-                        }) {
-                            Icon(Icons.Default.QrCode, contentDescription = "QR Code & Link", tint = PrimaryAccent)
-                        }
                     } else {
                         IconButton(onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.startProject(project)
                         }) {
                             Icon(Icons.Default.PlayArrow, contentDescription = "Start", tint = StatusGreen)
                         }
                     }
-                    IconButton(onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showEditDialog = true
-                    }) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit Project", tint = TextPrimary)
-                    }
-                    IconButton(
-                        onClick = {
-                            if (!isExporting) {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                shareExportedZip()
-                            }
-                        },
-                        enabled = !isExporting
-                    ) {
-                        if (isExporting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = PrimaryAccent,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Default.Share, contentDescription = "Export ZIP", tint = PrimaryAccent)
-                        }
-                    }
+
                     IconButton(onClick = { onOpenFiles(project.id) }) {
-                        Icon(Icons.Default.Folder, contentDescription = "Files", tint = TextSecondary)
+                        Icon(Icons.Default.FolderOpen, contentDescription = "Open Files", tint = PrimaryAccent)
                     }
-                    IconButton(onClick = { onOpenLogs(project.id) }) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Logs", tint = TextSecondary)
+                    var showDetailMenu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { showDetailMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = TextPrimary)
+                        }
+                        DropdownMenu(
+                            expanded = showDetailMenu,
+                            onDismissRequest = { showDetailMenu = false },
+                            modifier = Modifier.background(DarkSurfaceElevated)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit Project", color = TextPrimary) },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = PrimaryAccent) },
+                                onClick = {
+                                    showDetailMenu = false
+                                    showEditDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Export ZIP", color = TextPrimary) },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = PrimaryAccent) },
+                                onClick = {
+                                    showDetailMenu = false
+                                    shareExportedZip()
+                                }
+                            )
+                            if (project.status == ProjectStatus.RUNNING) {
+                                DropdownMenuItem(
+                                    text = { Text("QR Code & Link", color = TextPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.QrCode, contentDescription = null, tint = PrimaryAccent) },
+                                    onClick = {
+                                        showDetailMenu = false
+                                        val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
+                                        qrDialogUrl = "http://$ip:${project.port}"
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Files Explorer", color = TextPrimary) },
+                                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, tint = TextSecondary) },
+                                onClick = {
+                                    showDetailMenu = false
+                                    onOpenFiles(project.id)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete Project", color = StatusRed) },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = StatusRed) },
+                                onClick = {
+                                    showDetailMenu = false
+                                    showDeleteDialog = true
+                                }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
@@ -318,9 +394,19 @@ fun ProjectDetailScreen(
                 ) {
                     OverviewTabContent(
                         project = project,
+                        tunnelStatus = tunnelStatus,
+                        activeTunnelUrl = activeTunnelUrl,
+                        tunnelError = tunnelError,
+                        viewModel = viewModel,
+                        onStartTunnel = { viewModel.startQuickTunnelForProject(project) },
+                        onStopTunnel = { viewModel.stopTunnel() },
+                        onStart = { viewModel.startProject(project) },
+                        onStop = { viewModel.stopProject(project.id) },
+                        onRestart = { viewModel.restartProject(project.id) },
                         onOpenLogs = onOpenLogs,
                         onOpenFiles = onOpenFiles,
-                        onExportZip = { shareExportedZip() }
+                        onExportZip = { shareExportedZip() },
+                        onOpenBrowser = { browserPreviewUrl = it }
                     )
                 }
 
@@ -368,29 +454,30 @@ fun ProjectDetailScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(selectedTab) {
-                                var accumulated = 0f
-                                detectHorizontalDragGestures(
-                                    onDragStart = { accumulated = 0f },
-                                    onHorizontalDrag = { change, dragAmount ->
-                                        change.consume()
-                                        accumulated += dragAmount
-                                    },
-                                    onDragEnd = {
-                                        if (accumulated < -60f && selectedTab < tabs.size - 1) {
-                                            selectedTab++
-                                        } else if (accumulated > 60f && selectedTab > 0) {
-                                            selectedTab--
-                                        }
-                                    }
-                                )
-                            }
+                            
                     ) {
                         when (selectedTab) {
-                            0 -> OverviewTab(project = project, onOpenLogs = onOpenLogs, onOpenFiles = onOpenFiles, onExportZip = { shareExportedZip() })
-                            1 -> SnapshotsTab(project = project, viewModel = viewModel)
-                            2 -> PackagesTab(project = project, viewModel = viewModel)
-                            3 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                            0 -> OverviewTab(
+                                project = project,
+                                tunnelStatus = tunnelStatus,
+                                activeTunnelUrl = activeTunnelUrl,
+                                tunnelError = tunnelError,
+                                viewModel = viewModel,
+                                onStartTunnel = { viewModel.startQuickTunnelForProject(project) },
+                                onStopTunnel = { viewModel.stopTunnel() },
+                                onStart = { viewModel.startProject(project) },
+                                onStop = { viewModel.stopProject(project.id) },
+                                onRestart = { viewModel.restartProject(project.id) },
+                                onOpenLogs = onOpenLogs,
+                                onOpenFiles = onOpenFiles,
+                                onExportZip = { shareExportedZip() },
+                                onOpenBrowser = { browserPreviewUrl = it }
+                            )
+                            1 -> LogsAndTerminalTab(project = project, viewModel = viewModel)
+                            2 -> AnalyticsTab(project = project, viewModel = viewModel)
+                            3 -> SnapshotsTab(project = project, viewModel = viewModel)
+                            4 -> PackagesTab(project = project, viewModel = viewModel)
+                            5 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
                         }
                     }
                 }
@@ -400,27 +487,7 @@ fun ProjectDetailScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .pointerInput(selectedTab) {
-                        var accumulated = 0f
-                        detectHorizontalDragGestures(
-                            onDragStart = { accumulated = 0f },
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                accumulated += dragAmount
-                            },
-                            onDragEnd = {
-                                if (accumulated < -70f && selectedTab < tabs.size - 1) {
-                                    selectedTab++
-                                } else if (accumulated > 70f) {
-                                    if (selectedTab > 0) {
-                                        selectedTab--
-                                    } else {
-                                        onBackClick()
-                                    }
-                                }
-                            }
-                        )
-                    }
+                    
             ) {
                 ScrollableTabRow(
                     selectedTabIndex = selectedTab,
@@ -452,16 +519,58 @@ fun ProjectDetailScreen(
                 }
 
                 when (selectedTab) {
-                    0 -> OverviewTab(project = project, onOpenLogs = onOpenLogs, onOpenFiles = onOpenFiles, onExportZip = { shareExportedZip() })
-                    1 -> SnapshotsTab(project = project, viewModel = viewModel)
-                    2 -> PackagesTab(project = project, viewModel = viewModel)
-                    3 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                    0 -> OverviewTab(
+                            project = project,
+                            tunnelStatus = tunnelStatus,
+                            activeTunnelUrl = activeTunnelUrl,
+                            tunnelError = tunnelError,
+                            viewModel = viewModel,
+                            onStartTunnel = { viewModel.startQuickTunnelForProject(project) },
+                            onStopTunnel = { viewModel.stopTunnel() },
+                            onStart = { viewModel.startProject(project) },
+                            onStop = { viewModel.stopProject(project.id) },
+                            onRestart = { viewModel.restartProject(project.id) },
+                            onOpenLogs = onOpenLogs,
+                            onOpenFiles = onOpenFiles,
+                            onExportZip = { shareExportedZip() },
+                            onOpenBrowser = { browserPreviewUrl = it }
+                        )
+                    1 -> LogsAndTerminalTab(project = project, viewModel = viewModel)
+                    2 -> AnalyticsTab(project = project, viewModel = viewModel)
+                    3 -> SnapshotsTab(project = project, viewModel = viewModel)
+                    4 -> PackagesTab(project = project, viewModel = viewModel)
+                    5 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
                 }
             }
         }
     }
 
-    if (showEditDialog && project != null) {
+    if (showDeleteDialog && project != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete '${project.name}'?", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text = { Text("This will permanently delete this project and all its files.", color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteProject(project.id)
+                        showDeleteDialog = false
+                        onBackClick()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    if (showEditDialog) {
         var editName by remember(project.name) { mutableStateOf(project.name) }
         var editPort by remember(project.port) { mutableStateOf(project.port.toString()) }
 
@@ -616,10 +725,9 @@ fun ProjectDetailScreen(
 
                     Button(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            context.startActivity(intent)
+                            val target = qrDialogUrl ?: url
+                            qrDialogUrl = null
+                            browserPreviewUrl = target
                         },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
@@ -637,14 +745,32 @@ fun ProjectDetailScreen(
             }
         )
     }
+
+    browserPreviewUrl?.let { url ->
+        InAppBrowserDialog(
+            initialUrl = url,
+            onDismiss = { browserPreviewUrl = null },
+            onVisitRecorded = { recordedUrl -> viewModel.recordUrlVisit(project.id, recordedUrl) }
+        )
+    }
 }
 
 @Composable
 private fun OverviewTab(
     project: Project,
+    tunnelStatus: TunnelStatus,
+    activeTunnelUrl: String,
+    tunnelError: String?,
+    viewModel: ProjectsViewModel,
+    onStartTunnel: () -> Unit,
+    onStopTunnel: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onRestart: () -> Unit,
     onOpenLogs: (String) -> Unit,
     onOpenFiles: (String) -> Unit,
-    onExportZip: () -> Unit
+    onExportZip: () -> Unit,
+    onOpenBrowser: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -655,9 +781,19 @@ private fun OverviewTab(
     ) {
         OverviewTabContent(
             project = project,
+            tunnelStatus = tunnelStatus,
+            activeTunnelUrl = activeTunnelUrl,
+            tunnelError = tunnelError,
+            viewModel = viewModel,
+            onStartTunnel = onStartTunnel,
+            onStopTunnel = onStopTunnel,
+            onStart = onStart,
+            onStop = onStop,
+            onRestart = onRestart,
             onOpenLogs = onOpenLogs,
             onOpenFiles = onOpenFiles,
-            onExportZip = onExportZip
+            onExportZip = onExportZip,
+            onOpenBrowser = onOpenBrowser
         )
     }
 }
@@ -665,9 +801,19 @@ private fun OverviewTab(
 @Composable
 private fun OverviewTabContent(
     project: Project,
+    tunnelStatus: TunnelStatus,
+    activeTunnelUrl: String,
+    tunnelError: String?,
+    viewModel: ProjectsViewModel,
+    onStartTunnel: () -> Unit,
+    onStopTunnel: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onRestart: () -> Unit,
     onOpenLogs: (String) -> Unit,
     onOpenFiles: (String) -> Unit,
-    onExportZip: () -> Unit
+    onExportZip: () -> Unit,
+    onOpenBrowser: (String) -> Unit
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -675,6 +821,298 @@ private fun OverviewTabContent(
     val lanUrl = "http://$localIp:${project.port}"
     val loopbackUrl = "http://127.0.0.1:${project.port}"
     var showFullQrModal by remember { mutableStateOf(false) }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.5.dp, if (project.status == ProjectStatus.RUNNING) StatusGreen.copy(alpha = 0.5f) else DarkBorder)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (project.status == ProjectStatus.RUNNING) StatusGreen else TextMuted)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (project.status == ProjectStatus.RUNNING) "Server Online" else "Server Stopped",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = if (project.status == ProjectStatus.RUNNING) StatusGreen else TextMuted
+                    )
+                }
+                StatusChip(status = project.status)
+            }
+
+            if (project.status == ProjectStatus.RUNNING) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onStop,
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Stop Server", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onRestart,
+                        border = BorderStroke(1.dp, PrimaryAccent),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Restart", color = PrimaryAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            } else {
+                Button(
+                    onClick = onStart,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Start Server", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+            }
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Button(
+            onClick = { onOpenBrowser("http://127.0.0.1:${project.port}") },
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccentContainer),
+            border = BorderStroke(1.dp, PrimaryAccent),
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp)
+        ) {
+            Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Open Browser", color = PrimaryAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+
+        OutlinedButton(
+            onClick = { onOpenLogs(project.id) },
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp)
+        ) {
+            Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Process Logs", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.5.dp, if (tunnelStatus == TunnelStatus.CONNECTED) StatusGreen.copy(alpha = 0.6f) else PrimaryAccent.copy(alpha = 0.35f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Cloud, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Public Internet Port Forwarding", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                }
+
+                val (tLabel, tColor) = when (tunnelStatus) {
+                    TunnelStatus.DISCONNECTED -> Pair("OFFLINE", TextMuted)
+                    TunnelStatus.CONNECTING -> Pair("CONNECTING", StatusOrange)
+                    TunnelStatus.CONNECTED -> Pair("LIVE & PUBLIC", StatusGreen)
+                    TunnelStatus.ERROR -> Pair("ERROR", StatusRed)
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = tColor.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, tColor.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = tLabel,
+                        color = tColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Text(
+                "Creates a random public URL accessible by anyone worldwide on the internet. No Wi-Fi or router port-forwarding required.",
+                fontSize = 11.sp,
+                color = TextSecondary,
+                lineHeight = 16.sp
+            )
+
+            if (tunnelStatus == TunnelStatus.CONNECTED && activeTunnelUrl.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = DarkSurfaceElevated,
+                    border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Random Public URL (Worldwide)", fontSize = 10.sp, color = TextMuted, fontWeight = FontWeight.Medium)
+                            Text(
+                                text = activeTunnelUrl,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp,
+                                color = StatusGreen,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Public Tunnel URL", activeTunnelUrl))
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    Toast.makeText(context, "Copied public URL", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = StatusGreen, modifier = Modifier.size(18.dp))
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    onOpenBrowser(activeTunnelUrl)
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.OpenInBrowser, contentDescription = "Open", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, activeTunnelUrl)
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Share Public URL"))
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = "Share", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = onStopTunnel,
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
+                    border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Stop Public Port Forwarding", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            } else if (tunnelStatus == TunnelStatus.CONNECTING) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = DarkSurfaceElevated,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = PrimaryAccent,
+                            strokeWidth = 2.dp
+                        )
+                        Column {
+                            Text("Connecting to edge network...", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
+                            Text("Generating secure random public URL...", fontSize = 11.sp, color = TextSecondary)
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onStopTunnel,
+                    border = BorderStroke(1.dp, DarkBorder),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                ) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            } else {
+                tunnelError?.let { err ->
+                    Text(err, color = StatusRed, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onStartTunnel,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(Icons.Default.Cloud, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Forward Port to Internet (Free)", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            }
+        }
+    }
 
     if (project.status == ProjectStatus.RUNNING) {
         val qrBitmap = remember(lanUrl) { QrCodeGenerator.generate(lanUrl, 400) }
@@ -812,10 +1250,7 @@ private fun OverviewTabContent(
 
                                 IconButton(
                                     onClick = {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(lanUrl)).apply {
-                                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                        }
-                                        context.startActivity(intent)
+                                        onOpenBrowser(lanUrl)
                                     },
                                     modifier = Modifier.size(32.dp)
                                 ) {
@@ -961,55 +1396,19 @@ private fun OverviewTabContent(
                 StatusChip(status = project.status)
             }
 
+            val recentRequests by viewModel.observeRequests(project.id, 0L).collectAsState(initial = emptyList())
+            val callCount = recentRequests.size
+            val successCount = recentRequests.count { it.statusCode in 200..299 }
+            val errorCount = recentRequests.count { it.statusCode >= 400 }
+            val successRate = if (callCount > 0) (successCount * 100 / callCount) else 100
+
             DetailRow(label = "Local URL", value = "http://127.0.0.1:${project.port}")
             DetailRow(label = "Port", value = "${project.port}")
             DetailRow(label = "Runtime", value = project.runtime.displayName)
-            DetailRow(label = "Directory", value = project.workingDir)
             DetailRow(label = "Command", value = project.startupCommand)
-        }
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        OutlinedButton(
-            onClick = {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://127.0.0.1:${project.port}"))
-                context.startActivity(intent)
-            },
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, DarkBorder),
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Browser", color = TextPrimary, fontSize = 12.sp, maxLines = 1, softWrap = false)
-        }
-
-        OutlinedButton(
-            onClick = { onOpenFiles(project.id) },
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, DarkBorder),
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(Icons.Default.Folder, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Files", color = TextPrimary, fontSize = 12.sp, maxLines = 1, softWrap = false)
-        }
-
-        OutlinedButton(
-            onClick = { onOpenLogs(project.id) },
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, DarkBorder),
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Logs", color = TextPrimary, fontSize = 12.sp, maxLines = 1, softWrap = false)
+            DetailRow(label = "Total Calls", value = "$callCount requests")
+            DetailRow(label = "Success Rate", value = "$successRate%")
+            DetailRow(label = "Errors", value = "$errorCount errors")
         }
     }
 
@@ -1026,7 +1425,9 @@ private fun OverviewTabContent(
                 onClick = onExportZip,
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccentContainer),
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
             ) {
                 Icon(Icons.Default.Share, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1280,6 +1681,7 @@ private fun PackagesTab(
 ) {
     val isPython = project.runtime == RuntimeType.PYTHON
     val isNode = project.runtime == RuntimeType.NODEJS
+    val isPhp = project.runtime == RuntimeType.PHP
     val isInstalling by viewModel.isInstallingDeps.collectAsState()
     var customPackageInput by remember { mutableStateOf("") }
     var requirementsFileInput by remember { mutableStateOf("requirements.txt") }
@@ -1294,6 +1696,7 @@ private fun PackagesTab(
         when (project.runtime) {
             RuntimeType.PYTHON -> listOf("flask", "requests", "fastapi", "uvicorn", "pydantic", "django", "pytest", "python-dotenv")
             RuntimeType.NODEJS -> listOf("express", "cors", "dotenv", "ws", "axios", "mongoose", "nodemon", "jsonwebtoken")
+            RuntimeType.PHP -> listOf("guzzlehttp/guzzle", "symfony/var-dumper", "monolog/monolog", "vlucas/phpdotenv", "nikic/fast-route", "twig/twig", "nesbot/carbon", "illuminate/database")
             else -> emptyList()
         }
     }
@@ -1305,7 +1708,7 @@ private fun PackagesTab(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (!isPython && !isNode) {
+        if (!isPython && !isNode && !isPhp) {
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -1313,13 +1716,77 @@ private fun PackagesTab(
             ) {
                 Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "${project.runtime.displayName} projects use built-in execution. Custom package managers are active for Python (pip) and Node.js (npm).",
+                        "${project.runtime.displayName} projects use built-in execution. Custom package managers are active for Python (pip), Node.js (npm), and PHP (composer).",
                         color = TextSecondary,
                         fontSize = 13.sp
                     )
                 }
             }
         } else {
+            if (isPhp) {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Download, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Composer Dependency Manager",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = TextPrimary
+                            )
+                        }
+
+                        Text(
+                            "Manage PHP dependencies and composer.json natively.",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.installCustomPackage(project, "install")
+                                },
+                                enabled = !isInstalling,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("install", fontSize = 11.sp, color = PrimaryAccent)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.installCustomPackage(project, "update")
+                                },
+                                enabled = !isInstalling,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("update", fontSize = 11.sp, color = PrimaryAccent)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.installCustomPackage(project, "dump-autoload")
+                                },
+                                enabled = !isInstalling,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("autoload", fontSize = 11.sp, color = PrimaryAccent)
+                            }
+                        }
+                    }
+                }
+            }
             if (isPython) {
                 Card(
                     shape = RoundedCornerShape(14.dp),
@@ -1587,6 +2054,7 @@ private fun ControlTab(
     val tunnelStatus by viewModel.tunnelStatus.collectAsState()
     val activeTunnelUrl by viewModel.activeTunnelUrl.collectAsState()
     val tunnelError by viewModel.tunnelError.collectAsState()
+    val vpnDisabled by viewModel.isVpnDisabled(project.id).collectAsState(initial = false)
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
@@ -1600,6 +2068,43 @@ private fun ControlTab(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Disable VPN Visits", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "Block incoming server requests when active VPN connections are detected.",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                    Switch(
+                        checked = vpnDisabled,
+                        onCheckedChange = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.setVpnDisabled(project.id, it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = PrimaryAccent,
+                            checkedTrackColor = PrimaryAccentContainer,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = DarkSurfaceElevated
+                        )
+                    )
+                }
+            }
+        }
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -1696,18 +2201,6 @@ private fun ControlTab(
                         Text("Stop Tunnel", color = StatusRed, fontWeight = FontWeight.Bold)
                     }
                 } else {
-                    Button(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.startQuickTunnelForProject(project)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Start Quick Tunnel (Free)", color = TextOnAccent, fontWeight = FontWeight.Bold)
-                    }
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1779,15 +2272,15 @@ private fun ControlTab(
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.startProject(project)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextOnAccent)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start Server", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Start Server", color = TextOnAccent, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -1888,5 +2381,942 @@ private fun DetailRow(label: String, value: String) {
             textAlign = TextAlign.End,
             fontFamily = if (value.startsWith("http") || value.startsWith("/") || value.all { it.isDigit() }) FontFamily.Monospace else FontFamily.Default
         )
+    }
+}
+
+@Composable
+private fun LogsAndTerminalTab(
+    project: Project,
+    viewModel: ProjectsViewModel
+) {
+    var subTab by remember { mutableIntStateOf(0) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DarkSurfaceElevated, RoundedCornerShape(10.dp))
+                .padding(4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (subTab == 0) PrimaryAccent else Color.Transparent)
+                    .clickable { subTab = 0 }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Process Logs",
+                    color = if (subTab == 0) TextOnAccent else TextMuted,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (subTab == 1) PrimaryAccent else Color.Transparent)
+                    .clickable { subTab = 1 }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Terminal",
+                    color = if (subTab == 1) TextOnAccent else TextMuted,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        if (subTab == 0) {
+            ProjectLiveLogsView(project = project, viewModel = viewModel)
+        } else {
+            ProjectTerminalTab(project = project, viewModel = viewModel)
+        }
+    }
+}
+
+@Composable
+private fun ProjectLiveLogsView(
+    project: Project,
+    viewModel: ProjectsViewModel
+) {
+    val logs by viewModel.observeLogs(project.id).collectAsState(initial = emptyList())
+    var searchQuery by remember { mutableStateOf("") }
+    var streamFilter by remember { mutableStateOf<com.localhost.core.model.LogStream?>(null) }
+    val listState = rememberLazyListState()
+
+    val filteredLogs = remember(logs, searchQuery, streamFilter) {
+        logs.filter { entry ->
+            (streamFilter == null || entry.stream == streamFilter) &&
+            (searchQuery.isBlank() || entry.message.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
+    LaunchedEffect(filteredLogs.size) {
+        if (filteredLogs.isNotEmpty()) {
+            listState.scrollToItem(filteredLogs.size - 1)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Filter logs...", color = TextMuted, fontSize = 12.sp) },
+                singleLine = true,
+                modifier = Modifier.weight(1f).height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    focusedBorderColor = PrimaryAccent,
+                    unfocusedBorderColor = DarkBorderSubtle,
+                    focusedContainerColor = DarkSurface,
+                    unfocusedContainerColor = DarkSurface
+                )
+            )
+
+            IconButton(
+                onClick = { viewModel.clearLogs(project.id) },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = "Clear logs", tint = TextMuted, modifier = Modifier.size(18.dp))
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val filters = listOf(null to "ALL", com.localhost.core.model.LogStream.STDOUT to "STDOUT", com.localhost.core.model.LogStream.STDERR to "STDERR", com.localhost.core.model.LogStream.SYSTEM to "SYSTEM")
+            filters.forEach { (stream, label) ->
+                val active = streamFilter == stream
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (active) PrimaryAccentContainer else DarkSurface,
+                    border = BorderStroke(1.dp, if (active) PrimaryAccent else DarkBorderSubtle),
+                    onClick = { streamFilter = stream },
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Box(modifier = Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                        Text(label, fontSize = 11.sp, color = if (active) PrimaryAccent else TextMuted, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        Surface(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            color = CodeBackground,
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            if (filteredLogs.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No log entries yet", color = TextMuted, fontSize = 12.sp)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    items(filteredLogs) { entry ->
+                        val color = when (entry.stream) {
+                            com.localhost.core.model.LogStream.STDERR -> StatusRed
+                            com.localhost.core.model.LogStream.SYSTEM -> PrimaryAccent
+                            else -> TextPrimary
+                        }
+                        SelectionContainer {
+                            Text(
+                                text = entry.message,
+                                color = color,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsTab(
+    project: Project,
+    viewModel: ProjectsViewModel
+) {
+    var selectedFilterIndex by remember { mutableIntStateOf(0) }
+    var showOnlyErrors by remember { mutableStateOf(false) }
+    val filterLabels = listOf("Past 3 hr", "Today (12 am)", "This week", "This month", "All time")
+
+    val sinceTimestamp = remember(selectedFilterIndex) {
+        val current = System.currentTimeMillis()
+        when (selectedFilterIndex) {
+            0 -> current - (3 * 3600 * 1000L)
+            1 -> {
+                val cal = java.util.Calendar.getInstance()
+                cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                cal.set(java.util.Calendar.MINUTE, 0)
+                cal.set(java.util.Calendar.SECOND, 0)
+                cal.set(java.util.Calendar.MILLISECOND, 0)
+                cal.timeInMillis
+            }
+            2 -> current - (7 * 86400 * 1000L)
+            3 -> current - (30 * 86400 * 1000L)
+            else -> 0L
+        }
+    }
+
+    val requests by viewModel.observeRequests(project.id, sinceTimestamp).collectAsState(initial = emptyList())
+    val totalRequests = requests.size
+    val totalBytes = requests.sumOf { it.responseBytes }
+    val visitsCount = requests.count { it.method == "GET" && (it.path == "/" || it.path.endsWith(".html") || !it.path.contains(".")) }
+    val success2xx = requests.count { it.statusCode in 200..299 }
+    val redirect3xx = requests.count { it.statusCode in 300..399 }
+    val client4xx = requests.count { it.statusCode in 400..499 }
+    val server5xx = requests.count { it.statusCode in 500..599 }
+    val totalErrors = requests.count { it.statusCode >= 400 || it.method == "ERR" }
+    val successRate = if (totalRequests > 0) (success2xx * 100 / totalRequests) else 100
+
+    val getCount = requests.count { it.method == "GET" }
+    val postCount = requests.count { it.method == "POST" }
+    val putCount = requests.count { it.method == "PUT" }
+    val deleteCount = requests.count { it.method == "DELETE" }
+    val patchCount = requests.count { it.method == "PATCH" }
+    val errCount = requests.count { it.method == "ERR" }
+
+    val dataTransferredText = when {
+        totalBytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", totalBytes / (1024.0 * 1024.0))
+        totalBytes >= 1024 -> String.format(Locale.US, "%.1f KB", totalBytes / 1024.0)
+        else -> "$totalBytes B"
+    }
+
+    val displayRequests = remember(requests, showOnlyErrors) {
+        if (showOnlyErrors) requests.filter { it.statusCode >= 400 || it.method == "ERR" }
+        else requests
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            filterLabels.forEachIndexed { index, label ->
+                val active = selectedFilterIndex == index
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (active) PrimaryAccentContainer else DarkSurface,
+                    border = BorderStroke(1.dp, if (active) PrimaryAccent else DarkBorder),
+                    onClick = { selectedFilterIndex = index },
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = label,
+                            fontSize = 12.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            color = if (active) PrimaryAccent else TextMuted
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = BorderStroke(1.dp, DarkBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Total Calls", color = TextMuted, fontSize = 11.sp)
+                    Text("$totalRequests", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("requests", color = TextSecondary, fontSize = 10.sp)
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = BorderStroke(1.dp, DarkBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Visits", color = TextMuted, fontSize = 11.sp)
+                    Text("$visitsCount", color = PrimaryAccent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("page hits", color = TextSecondary, fontSize = 10.sp)
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = BorderStroke(1.dp, DarkBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Success", color = TextMuted, fontSize = 11.sp)
+                    Text("$successRate%", color = StatusGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("$success2xx OK", color = TextSecondary, fontSize = 10.sp)
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = BorderStroke(1.dp, if (totalErrors > 0) StatusRed.copy(alpha = 0.5f) else DarkBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Errors", color = TextMuted, fontSize = 11.sp)
+                    Text("$totalErrors", color = if (totalErrors > 0) StatusRed else TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("4xx/5xx logs", color = TextSecondary, fontSize = 10.sp)
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = BorderStroke(1.dp, DarkBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("Data Usage", color = TextMuted, fontSize = 11.sp)
+                    Text(dataTransferredText, color = PrimaryAccent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("bandwidth", color = TextSecondary, fontSize = 10.sp)
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Request Volume Distribution", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+
+                val barCounts = remember(requests, sinceTimestamp) {
+                    val count = 12
+                    val span = (System.currentTimeMillis() - sinceTimestamp).coerceAtLeast(1000L)
+                    val buckets = IntArray(count)
+                    requests.forEach { r ->
+                        val offset = r.timestamp - sinceTimestamp
+                        if (offset in 0 until span) {
+                            val bucketIdx = ((offset * count) / span).toInt().coerceIn(0, count - 1)
+                            buckets[bucketIdx]++
+                        }
+                    }
+                    buckets.toList()
+                }
+
+                val maxBar = (barCounts.maxOrNull() ?: 1).coerceAtLeast(1)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(90.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    barCounts.forEach { bCount ->
+                        val fraction = (bCount.toFloat() / maxBar).coerceIn(0.08f, 1f)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(fraction)
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                .background(if (bCount > 0) PrimaryAccent else DarkSurfaceElevated)
+                        )
+                    }
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("HTTP Methods Distribution", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+
+                if (totalRequests > 0) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                    ) {
+                        val methodColors = listOf(
+                            Pair(getCount, Color(0xFF10B981)),
+                            Pair(postCount, Color(0xFFF59E0B)),
+                            Pair(putCount, Color(0xFF6366F1)),
+                            Pair(deleteCount, Color(0xFFF43F5E)),
+                            Pair(patchCount, Color(0xFF06B6D4)),
+                            Pair(errCount, Color(0xFFE11D48))
+                        )
+                        methodColors.forEach { (count, color) ->
+                            if (count > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(count.toFloat())
+                                        .fillMaxHeight()
+                                        .background(color)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    MethodBadgeItem("GET", getCount, totalRequests, Color(0xFF10B981))
+                    MethodBadgeItem("POST", postCount, totalRequests, Color(0xFFF59E0B))
+                    MethodBadgeItem("PUT", putCount, totalRequests, Color(0xFF6366F1))
+                    MethodBadgeItem("DEL", deleteCount, totalRequests, Color(0xFFF43F5E))
+                    MethodBadgeItem("ERR", errCount, totalRequests, Color(0xFFE11D48))
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("HTTP Status Codes Breakdown", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+
+                StatusBreakdownRow(label = "2xx Success", count = success2xx, total = totalRequests, color = StatusGreen)
+                StatusBreakdownRow(label = "3xx Redirection", count = redirect3xx, total = totalRequests, color = PrimaryAccent)
+                StatusBreakdownRow(label = "4xx Client Error", count = client4xx, total = totalRequests, color = StatusOrange)
+                StatusBreakdownRow(label = "5xx Server Error", count = server5xx, total = totalRequests, color = StatusRed)
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Persistent Request & Error History", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("${displayRequests.size} recorded entries", fontSize = 11.sp, color = TextMuted)
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (showOnlyErrors) StatusRed.copy(alpha = 0.2f) else DarkSurfaceElevated,
+                            border = BorderStroke(1.dp, if (showOnlyErrors) StatusRed else DarkBorderSubtle),
+                            modifier = Modifier.clickable { showOnlyErrors = !showOnlyErrors }
+                        ) {
+                            Text(
+                                "Errors Only",
+                                fontSize = 11.sp,
+                                color = if (showOnlyErrors) StatusRed else TextSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.clearRequests(project.id) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Clear History", tint = TextMuted, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+
+                if (displayRequests.isEmpty()) {
+                    Text("No requests captured in this time window.", color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
+                } else {
+                    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+                    displayRequests.take(60).forEach { r ->
+                        val statusColor = when (r.statusCode) {
+                            in 200..299 -> StatusGreen
+                            in 300..399 -> PrimaryAccent
+                            in 400..499 -> StatusOrange
+                            else -> StatusRed
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = DarkSurfaceElevated,
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = statusColor.copy(alpha = 0.15f),
+                                            border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
+                                        ) {
+                                            Text(
+                                                "${r.statusCode}",
+                                                color = statusColor,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Text(r.method, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = PrimaryAccent)
+                                        Text(r.path, fontSize = 12.sp, color = TextPrimary, fontFamily = FontFamily.Monospace)
+                                    }
+                                    Text(dateFormat.format(Date(r.timestamp)), fontSize = 10.sp, color = TextMuted)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("${r.durationMs}ms latency", fontSize = 10.sp, color = TextMuted)
+                                    if (r.responseBytes > 0) {
+                                        Text("${r.responseBytes} bytes", fontSize = 10.sp, color = TextMuted)
+                                    }
+                                }
+                                r.errorMessage?.let { err ->
+                                    Text(err, color = StatusRed, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MethodBadgeItem(method: String, count: Int, total: Int, color: Color) {
+    val pct = if (total > 0) (count * 100 / total) else 0
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = color.copy(alpha = 0.15f),
+            border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
+        ) {
+            Text(method, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Text("$count", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+        Text("$pct%", fontSize = 9.sp, color = TextMuted)
+    }
+}
+
+@Composable
+private fun StatusBreakdownRow(label: String, count: Int, total: Int, color: Color) {
+    val percent = if (total > 0) (count * 100 / total) else 0
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(label, fontSize = 12.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+            Text("$count ($percent%)", fontSize = 12.sp, color = color, fontWeight = FontWeight.Bold)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(DarkSurfaceElevated)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(if (total > 0) (count.toFloat() / total).coerceIn(0f, 1f) else 0f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(color)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProjectTerminalTab(
+    project: Project,
+    viewModel: ProjectsViewModel
+) {
+    val terminalsMap by viewModel.projectTerminals.collectAsState()
+    val runningMap by viewModel.projectTerminalRunning.collectAsState()
+    val isRunning = runningMap[project.id] == true
+    val history = remember(terminalsMap, project.id) {
+        terminalsMap[project.id] ?: listOf(ProjectTerminalLine("", "Project Terminal Ready\n"))
+    }
+
+    var input by remember { mutableStateOf("") }
+    var historyIndex by remember { mutableIntStateOf(-1) }
+    val listState = rememberLazyListState()
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val isPython = project.runtime == RuntimeType.PYTHON
+
+    val pipQuickActions = listOf(
+        "install -r reqs" to "pip install -r requirements.txt",
+        "pip list" to "pip list",
+        "pip check" to "pip check",
+        "pip outdated" to "pip list --outdated",
+        "rebuild venv" to "python3 -m venv --system-site-packages .venv"
+    )
+
+    val accessoryKeys = if (isPython) {
+        listOf("Tab", "Ctrl+C", "clear", "ls -la", "pwd", "pip list", "python app.py")
+    } else {
+        listOf("Tab", "Ctrl+C", "clear", "ls -la", "pwd", "cat", "rmdir")
+    }
+
+    val lastOutputLength = history.lastOrNull()?.output?.length ?: 0
+    LaunchedEffect(history.size, lastOutputLength) {
+        if (history.isNotEmpty()) {
+            listState.scrollToItem(history.size - 1, 10000)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .imePadding()
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (isPython) {
+            Surface(
+                color = DarkSurface,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, DarkBorderSubtle),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "PIP OPTIONS",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = PrimaryAccent
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        pipQuickActions.forEach { (label, command) ->
+                            Surface(
+                                color = DarkSurfaceElevated,
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.4f)),
+                                modifier = Modifier.clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.runProjectTerminalCommand(project, command)
+                                }
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(CodeBackground)
+                .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "user@localhost:/projects/${project.name}$",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        color = StatusYellow,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (isRunning) {
+                            Surface(
+                                color = StatusRed.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier.clickable { viewModel.stopProjectTerminalCommand(project.id) }
+                            ) {
+                                Text(
+                                    "STOP",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = StatusRed,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = DarkSurfaceElevated,
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.clickable { viewModel.clearProjectTerminal(project.id) }
+                        ) {
+                            Text(
+                                "CLEAR",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = TextSecondary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                SelectionContainer(modifier = Modifier.weight(1f)) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(history) { item ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val text = if (item.command.isNotBlank()) "$ ${item.command}\n${item.output}" else item.output
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("Terminal Output", text)
+                                        clipboard.setPrimaryClip(clip)
+                                    }
+                            ) {
+                                if (item.command.isNotBlank()) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "$ ",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = StatusGreen
+                                        )
+                                        Text(
+                                            text = item.command,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TextPrimary
+                                        )
+                                    }
+                                }
+                                if (item.output.isNotBlank()) {
+                                    val isError = item.output.contains("Error", ignoreCase = true) || item.output.contains("Failed", ignoreCase = true)
+                                    Text(
+                                        text = item.output,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        color = if (isError) StatusRed else TextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = DarkSurface,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, DarkBorderSubtle),
+                modifier = Modifier.clickable {
+                    val commands = history.map { it.command }.filter { it.isNotBlank() }
+                    if (commands.isNotEmpty() && historyIndex < commands.size - 1) {
+                        historyIndex++
+                        input = commands[commands.size - 1 - historyIndex]
+                    }
+                }
+            ) {
+                Text("↑", fontSize = 14.sp, color = TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+            }
+
+            Surface(
+                color = DarkSurface,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, DarkBorderSubtle),
+                modifier = Modifier.clickable {
+                    val commands = history.map { it.command }.filter { it.isNotBlank() }
+                    if (commands.isNotEmpty() && historyIndex > 0) {
+                        historyIndex--
+                        input = commands[commands.size - 1 - historyIndex]
+                    } else if (historyIndex == 0) {
+                        historyIndex = -1
+                        input = ""
+                    }
+                }
+            ) {
+                Text("↓", fontSize = 14.sp, color = TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+            }
+
+            accessoryKeys.forEach { key ->
+                Surface(
+                    color = DarkSurface,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, DarkBorderSubtle),
+                    modifier = Modifier.clickable {
+                        when (key) {
+                            "Ctrl+C" -> {
+                                viewModel.stopProjectTerminalCommand(project.id)
+                                input = ""
+                            }
+                            "clear" -> viewModel.clearProjectTerminal(project.id)
+                            "ls -la" -> viewModel.runProjectTerminalCommand(project, "ls -la")
+                            "pwd" -> viewModel.runProjectTerminalCommand(project, "pwd")
+                            "pip list" -> viewModel.runProjectTerminalCommand(project, "pip list")
+                            else -> input += key
+                        }
+                    }
+                ) {
+                    Text(
+                        text = key,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
+        Surface(
+            color = DarkSurface,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, DarkBorderSubtle),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$ ",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = StatusGreen
+                )
+
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        color = TextPrimary
+                    ),
+                    cursorBrush = SolidColor(PrimaryAccent),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = {
+                        if (input.isNotBlank()) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.runProjectTerminalCommand(project, input)
+                            input = ""
+                            historyIndex = -1
+                        }
+                    }),
+                    modifier = Modifier.weight(1f)
+                )
+
+                IconButton(
+                    onClick = {
+                        if (input.isNotBlank()) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.runProjectTerminalCommand(project, input)
+                            input = ""
+                            historyIndex = -1
+                        }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Run",
+                        tint = if (input.isNotBlank()) PrimaryAccent else TextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
     }
 }

@@ -17,7 +17,7 @@ class TerminalViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _history = MutableStateFlow<List<TerminalLine>>(listOf(
-        TerminalLine("", "Localhost Interactive CLI\nType 'help' for available commands.\n", localhostCli.getCurrentPath())
+        TerminalLine("", "Localhost Interactive CLI\nType 'help' for available commands.\n", localhostCli.getCurrentPromptPrefix())
     ))
     val history = _history.asStateFlow()
 
@@ -29,23 +29,46 @@ class TerminalViewModel @Inject constructor(
 
     private var activeJob: Job? = null
 
+    fun getActiveVenvName(): String? = localhostCli.getActiveVenvName()
+
     fun runCommand(cmd: String) {
         if (cmd.isBlank()) return
         activeJob?.cancel()
 
         activeJob = viewModelScope.launch {
             _isRunning.value = true
+            val prompt = localhostCli.getCurrentPromptPrefix()
+            val currentOutput = StringBuilder()
+            val targetIndex = _history.value.size
+            _history.value = _history.value + TerminalLine(cmd, "", prompt)
+
             try {
-                val out = localhostCli.execute(cmd)
+                val out = localhostCli.execute(cmd) { chunk ->
+                    currentOutput.append(chunk)
+                    val list = _history.value.toMutableList()
+                    if (targetIndex < list.size) {
+                        list[targetIndex] = TerminalLine(cmd, currentOutput.toString(), prompt)
+                        _history.value = list
+                    }
+                }
                 _currentPath.value = localhostCli.getCurrentPath()
 
                 if (out == "__CLEAR__") {
                     _history.value = emptyList()
                 } else {
-                    _history.value = _history.value + TerminalLine(cmd, out, _currentPath.value)
+                    val finalOutput = if (currentOutput.isNotEmpty()) currentOutput.toString().trimEnd() else out
+                    val list = _history.value.toMutableList()
+                    if (targetIndex < list.size) {
+                        list[targetIndex] = TerminalLine(cmd, finalOutput, prompt)
+                        _history.value = list
+                    }
                 }
             } catch (_: Exception) {
-                _history.value = _history.value + TerminalLine(cmd, "^C (Interrupted)", _currentPath.value)
+                val list = _history.value.toMutableList()
+                if (targetIndex < list.size) {
+                    list[targetIndex] = TerminalLine(cmd, "^C (Interrupted)", prompt)
+                    _history.value = list
+                }
             } finally {
                 _isRunning.value = false
             }
@@ -56,7 +79,14 @@ class TerminalViewModel @Inject constructor(
         localhostCli.interrupt()
         activeJob?.cancel()
         _isRunning.value = false
-        _history.value = _history.value + TerminalLine("", "^C", _currentPath.value)
+        val prompt = localhostCli.getCurrentPromptPrefix()
+        val list = _history.value.toMutableList()
+        if (list.isNotEmpty() && list.last().output.isEmpty()) {
+            list[list.lastIndex] = list.last().copy(output = "^C")
+            _history.value = list
+        } else {
+            _history.value = _history.value + TerminalLine("", "^C", prompt)
+        }
     }
 
     fun clear() {

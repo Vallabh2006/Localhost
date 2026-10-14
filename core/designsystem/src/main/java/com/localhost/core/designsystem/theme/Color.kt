@@ -2,10 +2,40 @@ package com.localhost.core.designsystem.theme
 
 import androidx.compose.ui.graphics.Color
 
-val PrimaryAccent = Color(0xFF5A75E0)
-val PrimaryAccentLight = Color(0xFF758DE8)
-val PrimaryAccentDark = Color(0xFF455DC9)
-val PrimaryAccentContainer = Color(0x265A75E0)
+fun getAccentColor(name: String): Color {
+    if (name.startsWith("#")) {
+        return try {
+            Color(android.graphics.Color.parseColor(name))
+        } catch (_: Exception) {
+            Color(0xFF5A75E0)
+        }
+    }
+    return when (name.lowercase()) {
+        "emerald" -> Color(0xFF10B981)
+        "cyan" -> Color(0xFF06B6D4)
+        "amber" -> Color(0xFFF59E0B)
+        "rose" -> Color(0xFFF43F5E)
+        "purple" -> Color(0xFFA855F7)
+        "teal" -> Color(0xFF14B8A6)
+        "sunset" -> Color(0xFFFF6B4A)
+        "violet" -> Color(0xFF7C3AED)
+        "crimson" -> Color(0xFFE11D48)
+        "lime" -> Color(0xFF84CC16)
+        "indigo" -> Color(0xFF5A75E0)
+        else -> {
+            try {
+                Color(android.graphics.Color.parseColor(name))
+            } catch (_: Exception) {
+                Color(0xFF5A75E0)
+            }
+        }
+    }
+}
+
+var PrimaryAccent: Color = Color(0xFF5A75E0)
+var PrimaryAccentLight: Color = Color(0xFF758DE8)
+var PrimaryAccentDark: Color = Color(0xFF455DC9)
+var PrimaryAccentContainer: Color = Color(0x265A75E0)
 
 val PrimaryBlue = PrimaryAccent
 val PrimaryBlueVariant = PrimaryAccentDark

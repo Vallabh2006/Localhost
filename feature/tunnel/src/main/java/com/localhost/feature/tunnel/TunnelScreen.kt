@@ -38,6 +38,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,8 +50,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -72,6 +77,7 @@ import com.localhost.core.designsystem.theme.DarkSurface
 import com.localhost.core.designsystem.theme.DarkSurfaceElevated
 import com.localhost.core.designsystem.theme.PrimaryAccent
 import com.localhost.core.designsystem.theme.StatusGreen
+import com.localhost.core.designsystem.theme.StatusOrange
 import com.localhost.core.designsystem.theme.StatusRed
 import com.localhost.core.designsystem.theme.StatusYellow
 import com.localhost.core.designsystem.theme.TextMuted
@@ -83,8 +89,10 @@ import com.localhost.core.model.TunnelStatus
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TunnelScreen(
-    viewModel: TunnelViewModel
+    viewModel: TunnelViewModel,
+    onBackClick: () -> Unit = {}
 ) {
+    BackHandler { onBackClick() }
     val status by viewModel.tunnelStatus.collectAsState()
     val activeUrl by viewModel.activeUrl.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
@@ -97,16 +105,20 @@ fun TunnelScreen(
     var tokenNameText by remember { mutableStateOf("") }
     var tokensDropdownExpanded by remember { mutableStateOf(false) }
 
-    var targetPortText by remember { mutableStateOf("8080") }
+    var targetPortText by remember { mutableStateOf("8000") }
     var httpsPortText by remember { mutableStateOf("8443") }
 
     Scaffold(
         containerColor = DarkBackground,
         topBar = {
             TopAppBar(
-                title = { Text("HTTPS & Tunnels", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface),
-                modifier = Modifier.height(48.dp)
+                title = { Text("HTTPS & Tunnels", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimary) },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
             )
         }
     ) { padding ->
@@ -119,117 +131,181 @@ fun TunnelScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = BorderStroke(1.dp, DarkBorder)
+                border = BorderStroke(1.5.dp, if (status == TunnelStatus.CONNECTED) StatusGreen.copy(alpha = 0.6f) else PrimaryAccent.copy(alpha = 0.3f))
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Lock, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.Cloud, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("Local Nginx HTTPS Proxy", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-                                Text("Tunnel local HTTP port to local SSL/TLS", color = TextSecondary, fontSize = 11.sp)
+                                Text("Public Internet Port Forwarding", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                                Text("Worldwide public HTTPS URL (Zero setup)", color = TextSecondary, fontSize = 11.sp)
                             }
                         }
-                        val statusColor = if (nginxConfig.isRunning) StatusGreen else TextMuted
-                        val statusText = if (nginxConfig.isRunning) "ACTIVE" else "STOPPED"
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(statusColor))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(statusText, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = statusColor)
+
+                        val (tLabel, tColor) = when (status) {
+                            TunnelStatus.DISCONNECTED -> Pair("OFFLINE", TextMuted)
+                            TunnelStatus.CONNECTING -> Pair("CONNECTING", StatusOrange)
+                            TunnelStatus.CONNECTED -> Pair("ONLINE", StatusGreen)
+                            TunnelStatus.ERROR -> Pair("ERROR", StatusRed)
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = tColor.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, tColor.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = tLabel,
+                                color = tColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
                         }
                     }
 
-                    if (nginxConfig.isRunning) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DarkSurfaceElevated)
-                                .border(1.dp, PrimaryAccent.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                    Text(
+                        "Forwards your local port to the public internet with a random HTTPS URL (like https://xxxx.trycloudflare.com). Anyone in the world can access it without being on the same Wi-Fi.",
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    )
+
+                    if (status == TunnelStatus.CONNECTED && activeUrl.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = DarkSurfaceElevated,
+                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Active HTTPS Endpoints:", fontSize = 11.sp, color = TextMuted)
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(nginxConfig.localHttpsUrl, fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = PrimaryAccent)
-                                IconButton(
-                                    onClick = {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(nginxConfig.localHttpsUrl))
-                                        context.startActivity(intent)
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(Icons.Default.OpenInBrowser, contentDescription = "Open", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Random Public URL (Worldwide)", fontSize = 10.sp, color = TextMuted, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        text = activeUrl,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 13.sp,
+                                        color = StatusGreen,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
-                            }
-                            if (nginxConfig.lanHttpsUrl.isNotBlank()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(nginxConfig.lanHttpsUrl, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TextSecondary)
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     IconButton(
                                         onClick = {
                                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("LAN URL", nginxConfig.lanHttpsUrl))
-                                            Toast.makeText(context, "Copied LAN HTTPS URL", Toast.LENGTH_SHORT).show()
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("Public Tunnel URL", activeUrl))
+                                            Toast.makeText(context, "Copied public URL", Toast.LENGTH_SHORT).show()
                                         },
-                                        modifier = Modifier.size(28.dp)
+                                        modifier = Modifier.size(36.dp)
                                     ) {
-                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = StatusGreen, modifier = Modifier.size(18.dp))
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(activeUrl)).apply {
+                                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                            }
+                                            context.startActivity(intent)
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.OpenInBrowser, contentDescription = "Open", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_TEXT, activeUrl)
+                                            }
+                                            context.startActivity(Intent.createChooser(sendIntent, "Share Public URL"))
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.Share, contentDescription = "Share", tint = TextSecondary, modifier = Modifier.size(18.dp))
                                     }
                                 }
                             }
                         }
 
                         Button(
-                            onClick = { viewModel.stopNginx() },
+                            onClick = { viewModel.stopTunnel() },
                             colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
                             border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Stop Public Port Forwarding", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    } else if (status == TunnelStatus.CONNECTING) {
+                        Surface(
                             shape = RoundedCornerShape(10.dp),
+                            color = DarkSurfaceElevated,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Stop Nginx HTTPS Proxy", color = StatusRed, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = PrimaryAccent,
+                                    strokeWidth = 2.dp
+                                )
+                                Column {
+                                    Text("Generating random public URL...", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
+                                    Text("Connecting your port to Cloudflare edge...", fontSize = 11.sp, color = TextSecondary)
+                                }
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = { viewModel.stopTunnel() },
+                            border = BorderStroke(1.dp, DarkBorder),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                        ) {
+                            Text("Cancel", color = TextSecondary)
                         }
                     } else {
+                        errorMessage?.let { err ->
+                            Text(err, color = StatusRed, fontSize = 11.sp)
+                        }
+
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedTextField(
                                 value = targetPortText,
                                 onValueChange = { targetPortText = it.filter { ch -> ch.isDigit() } },
-                                label = { Text("Target Port") },
+                                label = { Text("Local Port to Forward") },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary,
-                                    focusedBorderColor = PrimaryAccent,
-                                    unfocusedBorderColor = DarkBorderSubtle,
-                                    focusedContainerColor = DarkSurfaceElevated,
-                                    unfocusedContainerColor = DarkSurfaceElevated
-                                )
-                            )
-                            OutlinedTextField(
-                                value = httpsPortText,
-                                onValueChange = { httpsPortText = it.filter { ch -> ch.isDigit() } },
-                                label = { Text("HTTPS Port") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = TextPrimary,
                                     unfocusedTextColor = TextPrimary,
@@ -244,16 +320,17 @@ fun TunnelScreen(
                         Button(
                             onClick = {
                                 val tPort = targetPortText.toIntOrNull() ?: 8080
-                                val hPort = httpsPortText.toIntOrNull() ?: 8443
-                                viewModel.startNginx(tPort, hPort)
+                                viewModel.startQuickTunnel(tPort)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Start Nginx HTTPS Proxy", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Cloud, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Forward Port to Internet (Free)", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
                     }
                 }
@@ -330,8 +407,10 @@ fun TunnelScreen(
                             onClick = { viewModel.stopTunnel() },
                             colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
                             border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
                         ) {
                             Text("Stop Tunnel", color = StatusRed, fontWeight = FontWeight.Bold)
                         }
@@ -438,8 +517,10 @@ fun TunnelScreen(
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1.5f)
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1.5f)
+                                    .height(48.dp)
                             ) {
                                 Text("Connect Named Tunnel", color = TextOnAccent, fontWeight = FontWeight.Bold)
                             }

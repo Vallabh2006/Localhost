@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.localhost.core.data.repository.SettingsRepository
 import com.localhost.core.model.RuntimePack
 import com.localhost.core.model.RuntimeType
+import com.localhost.runtime.manager.ComposerManager
 import com.localhost.runtime.manager.RuntimeManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +19,8 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val runtimeManager: RuntimeManager
+    private val runtimeManager: RuntimeManager,
+    private val composerManager: ComposerManager
 ) : ViewModel() {
 
     val wakeLock: StateFlow<Boolean> = settingsRepository.wakeLockEnabled
@@ -33,8 +35,16 @@ class SettingsViewModel @Inject constructor(
     val vpnEnabled: StateFlow<Boolean> = settingsRepository.vpnEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    val accentColorName: StateFlow<String> = settingsRepository.accentColorName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Indigo")
+
     val installedPacks: StateFlow<List<RuntimePack>> = runtimeManager.installedPacks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val isComposerDownloading: StateFlow<Boolean> = composerManager.isDownloading
+    val composerDownloadProgress: StateFlow<Float> = composerManager.downloadProgress
+
+    fun isComposerInstalled(): Boolean = composerManager.isInstalled()
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage = _errorMessage.asStateFlow()
@@ -53,6 +63,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setVpnEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setVpnEnabled(enabled) }
+    }
+
+    fun setAccentColorName(name: String) {
+        viewModelScope.launch { settingsRepository.setAccentColorName(name) }
     }
 
     fun installRuntime(pack: RuntimePack) {
@@ -75,6 +89,15 @@ class SettingsViewModel @Inject constructor(
     fun uninstallRuntime(runtime: RuntimeType) {
         viewModelScope.launch {
             runtimeManager.uninstallRuntime(runtime)
+        }
+    }
+
+    fun downloadComposer() {
+        viewModelScope.launch {
+            val res = composerManager.downloadComposer()
+            if (res.isFailure) {
+                _errorMessage.value = "Failed to download Composer: ${res.exceptionOrNull()?.message}"
+            }
         }
     }
 

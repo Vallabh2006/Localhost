@@ -1,20 +1,25 @@
 package com.localhost.feature.settings
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.border
-import androidx.compose.foundation.background
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -66,8 +71,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -89,6 +98,7 @@ import com.localhost.core.designsystem.theme.TextMuted
 import com.localhost.core.designsystem.theme.TextOnAccent
 import com.localhost.core.designsystem.theme.TextPrimary
 import com.localhost.core.designsystem.theme.TextSecondary
+import com.localhost.core.designsystem.theme.getAccentColor
 import com.localhost.core.model.DownloadStatus
 import com.localhost.core.model.RuntimePack
 import com.localhost.core.model.RuntimeType
@@ -96,7 +106,8 @@ import com.localhost.core.model.RuntimeType
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    viewModel: SettingsViewModel
+    viewModel: SettingsViewModel,
+    onNavigateToTunnel: () -> Unit = {}
 ) {
     val wakeLockActive by viewModel.wakeLock.collectAsState()
     val vpnActive by viewModel.vpnEnabled.collectAsState()
@@ -112,6 +123,12 @@ fun SettingsScreen(
     var isBatteryOptimized by remember { mutableStateOf(true) }
     var showHelpDialog by remember { mutableStateOf(false) }
 
+    BackHandler {
+        if (showHelpDialog) {
+            showHelpDialog = false
+        }
+    }
+
     LaunchedEffect(Unit) {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         isBatteryOptimized = if (pm != null) !pm.isIgnoringBatteryOptimizations(context.packageName) else false
@@ -126,6 +143,7 @@ fun SettingsScreen(
 
     Scaffold(
         containerColor = DarkBackground,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -137,8 +155,7 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Help Guide", tint = PrimaryAccent)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface),
-                modifier = Modifier.height(48.dp)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkSurface)
             )
         }
     ) { padding ->
@@ -158,17 +175,7 @@ fun SettingsScreen(
                 ) {
                     SystemSection(
                         context = context,
-                        wakeLockActive = wakeLockActive,
-                        vpnActive = vpnActive,
                         isBatteryOptimized = isBatteryOptimized,
-                        onToggleWakeLock = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.setWakeLock(it)
-                        },
-                        onToggleVpn = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.setVpnEnabled(it)
-                        },
                         onRequestBattery = {
                             try {
                                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
@@ -194,7 +201,7 @@ fun SettingsScreen(
                         viewModel = viewModel
                     )
 
-                    AppearanceSection()
+                    AppearanceSection(viewModel)
 
                 AboutSection()
                 }
@@ -210,17 +217,7 @@ fun SettingsScreen(
             ) {
                 SystemSection(
                     context = context,
-                    wakeLockActive = wakeLockActive,
-                    vpnActive = vpnActive,
                     isBatteryOptimized = isBatteryOptimized,
-                    onToggleWakeLock = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.setWakeLock(it)
-                    },
-                    onToggleVpn = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.setVpnEnabled(it)
-                    },
                     onRequestBattery = {
                         try {
                             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
@@ -239,11 +236,11 @@ fun SettingsScreen(
                     viewModel = viewModel
                 )
 
-                AppearanceSection()
+                AppearanceSection(viewModel)
 
                 AboutSection()
 
-                Spacer(modifier = Modifier.height(72.dp))
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
@@ -324,11 +321,7 @@ fun SettingsScreen(
 @Composable
 private fun SystemSection(
     context: Context,
-    wakeLockActive: Boolean,
-    vpnActive: Boolean,
     isBatteryOptimized: Boolean,
-    onToggleWakeLock: (Boolean) -> Unit,
-    onToggleVpn: (Boolean) -> Unit,
     onRequestBattery: () -> Unit
 ) {
     Text("System & Performance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -339,55 +332,6 @@ private fun SystemSection(
         border = BorderStroke(1.dp, DarkBorder)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = if (wakeLockActive) StatusGreen else TextMuted, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text("CPU WakeLock", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                        Text("Prevents phone CPU from sleeping while servers run", color = TextSecondary, fontSize = 11.sp)
-                    }
-                }
-                Switch(
-                    checked = wakeLockActive,
-                    onCheckedChange = onToggleWakeLock,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = TextOnAccent,
-                        checkedTrackColor = PrimaryAccent,
-                        uncheckedThumbColor = TextMuted,
-                        uncheckedTrackColor = DarkSurfaceElevated
-                    )
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.VpnKey, contentDescription = null, tint = if (vpnActive) StatusGreen else TextMuted, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text("VPN Mode", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                        Text("Allow networking and tunnel routing over active VPN", color = TextSecondary, fontSize = 11.sp)
-                    }
-                }
-                Switch(
-                    checked = vpnActive,
-                    onCheckedChange = onToggleVpn,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = TextOnAccent,
-                        checkedTrackColor = PrimaryAccent,
-                        uncheckedThumbColor = TextMuted,
-                        uncheckedTrackColor = DarkSurfaceElevated
-                    )
-                )
-            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -433,9 +377,61 @@ private fun RuntimesSection(
     installedPacks: List<RuntimePack>,
     viewModel: SettingsViewModel
 ) {
-    Text("Runtime Environments", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+    val isComposerDownloading by viewModel.isComposerDownloading.collectAsState()
+    val composerProgress by viewModel.composerDownloadProgress.collectAsState()
+    val isComposerInstalled = viewModel.isComposerInstalled()
+
+    Text("Runtime Environments & Tools", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Download, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("PHP Composer", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
+                            Text("Dependency manager for PHP runtime (composer.phar)", color = TextSecondary, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (isComposerInstalled) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = StatusGreen.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.4f))
+                        ) {
+                            Text("Ready", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        }
+                    } else if (isComposerDownloading) {
+                        LinearProgressIndicator(
+                            progress = { composerProgress },
+                            modifier = Modifier.width(80.dp),
+                            color = PrimaryAccent
+                        )
+                    } else {
+                        Button(
+                            onClick = { viewModel.downloadComposer() },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccentContainer)
+                        ) {
+                            Text("Install", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
         installedPacks.forEach { pack ->
             RuntimePackItem(
                 pack = pack,
@@ -636,64 +632,189 @@ private fun RuntimePackItem(
     }
 }
 
-
 @Composable
-private fun AppearanceSection() {
-    var selectedAccent by remember { mutableStateOf("Emerald") }
-    var isCompactMode by remember { mutableStateOf(false) }
+private fun AppearanceSection(viewModel: SettingsViewModel) {
+    val selectedAccent by viewModel.accentColorName.collectAsState()
+    val activeColor = remember(selectedAccent) { getAccentColor(selectedAccent) }
 
-    val accents = listOf(
+    val presets = listOf(
+        Pair("Indigo", Color(0xFF5A75E0)),
         Pair("Emerald", Color(0xFF10B981)),
         Pair("Cyan", Color(0xFF06B6D4)),
-        Pair("Indigo", Color(0xFF6366F1)),
         Pair("Amber", Color(0xFFF59E0B)),
-        Pair("Rose", Color(0xFFF43F5E))
+        Pair("Rose", Color(0xFFF43F5E)),
+        Pair("Purple", Color(0xFFA855F7)),
+        Pair("Teal", Color(0xFF14B8A6)),
+        Pair("Sunset", Color(0xFFFF6B4A)),
+        Pair("Violet", Color(0xFF7C3AED)),
+        Pair("Crimson", Color(0xFFE11D48)),
+        Pair("Lime", Color(0xFF84CC16))
     )
 
-    Text("Appearance & UI Accents", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+    Text("Appearance & Accent Theme", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
 
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
         border = BorderStroke(1.dp, DarkBorder)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("Accent Color Palette", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                accents.forEach { (name, color) ->
-                    val isSelected = selectedAccent == name
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .border(
-                                width = if (isSelected) 3.dp else 1.dp,
-                                color = if (isSelected) androidx.compose.ui.graphics.Color.White else DarkBorder,
-                                shape = CircleShape
-                            )
-                            .clickable { selectedAccent = name },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isSelected) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-            }
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Compact UI Mode", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
-                    Text("Tighter padding and minimal card spacing across views", fontSize = 11.sp, color = TextSecondary)
+                Column {
+                    Text("Interactive Color Wheel", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Touch or drag to dynamically tint the entire app theme", color = TextSecondary, fontSize = 11.sp)
                 }
-                Switch(
-                    checked = isCompactMode,
-                    onCheckedChange = { isCompactMode = it }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(activeColor)
+                            .border(1.5.dp, Color.White, CircleShape)
+                    )
+                    Text(
+                        text = selectedAccent,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = activeColor
+                    )
+                }
+            }
+
+            ColorWheelCanvas(
+                currentColor = activeColor,
+                onColorChange = { hex -> viewModel.setAccentColorName(hex) }
+            )
+
+            Text("Quick Presets", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextMuted)
+            presets.chunked(6).forEach { rowAccents ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    rowAccents.forEach { (name, color) ->
+                        val isSelected = selectedAccent.equals(name, ignoreCase = true)
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(color)
+                                .border(
+                                    width = if (isSelected) 3.dp else 1.dp,
+                                    color = if (isSelected) Color.White else DarkBorder,
+                                    shape = CircleShape
+                                )
+                                .clickable { viewModel.setAccentColorName(name) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorWheelCanvas(
+    currentColor: Color,
+    onColorChange: (String) -> Unit
+) {
+    var touchPos by remember { mutableStateOf<Offset?>(null) }
+    val sweepColors = remember {
+        listOf(
+            Color.Red,
+            Color.Yellow,
+            Color.Green,
+            Color.Cyan,
+            Color.Blue,
+            Color.Magenta,
+            Color.Red
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier
+                .size(170.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val dx = offset.x - center.x
+                        val dy = offset.y - center.y
+                        val radius = size.width.coerceAtMost(size.height) / 2f
+                        val dist = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                        if (dist <= radius) {
+                            touchPos = offset
+                            val angle = (Math.toDegrees(Math.atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
+                            val sat = (dist / radius).coerceIn(0.15f, 1f)
+                            val hsv = floatArrayOf(angle.toFloat(), sat, 1f)
+                            val colorInt = android.graphics.Color.HSVToColor(hsv)
+                            val hex = String.format(java.util.Locale.US, "#%06X", 0xFFFFFF and colorInt)
+                            onColorChange(hex)
+                        }
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, _ ->
+                        change.consume()
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val dx = change.position.x - center.x
+                        val dy = change.position.y - center.y
+                        val radius = size.width.coerceAtMost(size.height) / 2f
+                        val dist = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat().coerceAtMost(radius)
+                        val angle = (Math.toDegrees(Math.atan2(dy.toDouble(), dx.toDouble())) + 360.0) % 360.0
+                        val sat = (dist / radius).coerceIn(0.15f, 1f)
+                        val hsv = floatArrayOf(angle.toFloat(), sat, 1f)
+                        val colorInt = android.graphics.Color.HSVToColor(hsv)
+                        val hex = String.format(java.util.Locale.US, "#%06X", 0xFFFFFF and colorInt)
+                        val rad = Math.toRadians(angle)
+                        touchPos = Offset((center.x + dist * Math.cos(rad)).toFloat(), (center.y + dist * Math.sin(rad)).toFloat())
+                        onColorChange(hex)
+                    }
+                }
+        ) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = size.minDimension / 2f
+
+            drawCircle(
+                brush = Brush.sweepGradient(sweepColors, center),
+                radius = radius,
+                center = center
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color.White, Color.Transparent),
+                    center = center,
+                    radius = radius
+                ),
+                radius = radius,
+                center = center
+            )
+
+            touchPos?.let { pos ->
+                drawCircle(
+                    color = Color.White,
+                    radius = 10.dp.toPx(),
+                    center = pos,
+                    style = Stroke(width = 3.dp.toPx())
+                )
+                drawCircle(
+                    color = currentColor,
+                    radius = 7.dp.toPx(),
+                    center = pos
                 )
             }
         }

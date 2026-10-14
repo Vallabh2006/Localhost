@@ -74,3 +74,21 @@ interface MetricsDao {
     @Query("DELETE FROM metrics WHERE timestamp < :beforeTimestamp")
     suspend fun deleteOldMetrics(beforeTimestamp: Long)
 }
+
+@Dao
+interface RequestRecordDao {
+    @Query("SELECT * FROM request_records WHERE projectId = :projectId AND timestamp >= :sinceTimestamp ORDER BY timestamp DESC")
+    fun observeRequests(projectId: String, sinceTimestamp: Long): Flow<List<RequestRecordEntity>>
+
+    @Query("SELECT * FROM request_records WHERE projectId = :projectId AND timestamp >= :sinceTimestamp ORDER BY timestamp DESC")
+    suspend fun getRequests(projectId: String, sinceTimestamp: Long): List<RequestRecordEntity>
+
+    @Query("SELECT * FROM request_records WHERE projectId = :projectId AND statusCode >= 400 ORDER BY timestamp DESC LIMIT 300")
+    fun observeErrorLogs(projectId: String): Flow<List<RequestRecordEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(record: RequestRecordEntity)
+
+    @Query("DELETE FROM request_records WHERE projectId = :projectId")
+    suspend fun clearForProject(projectId: String)
+}

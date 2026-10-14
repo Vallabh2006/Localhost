@@ -48,6 +48,15 @@ class LocalhostCli @Inject constructor(
     private var previousDirectory: File = rootDirectory
     private val commandHistory = mutableListOf<String>()
     private var activeSubProcess: Process? = null
+    private var activeVenvDir: File? = null
+
+    fun getActiveVenvName(): String? = activeVenvDir?.name
+
+    fun getCurrentPromptPrefix(): String {
+        val path = getCurrentPath()
+        val venv = activeVenvDir?.name
+        return if (venv != null) "($venv) $path" else path
+    }
 
     fun getCurrentPath(): String {
         val rootPath = rootDirectory.canonicalPath
@@ -69,7 +78,31 @@ class LocalhostCli @Inject constructor(
         } catch (_: Exception) {}
     }
 
-    suspend fun execute(commandLine: String): String = withContext(Dispatchers.IO) {
+    suspend fun executeInDirectory(
+        workDir: File,
+        commandLine: String,
+        onOutputChunk: ((String) -> Unit)? = null
+    ): String = withContext(Dispatchers.IO) {
+        val prevCurrent = currentDirectory
+        val prevActiveVenv = activeVenvDir
+        try {
+            currentDirectory = workDir
+            val detectedVenv = listOf(
+                File(workDir, ".venv"),
+                File(workDir, "myenv"),
+                File(workDir, "venv")
+            ).firstOrNull { File(it, "bin/python").exists() }
+            if (detectedVenv != null) {
+                activeVenvDir = detectedVenv
+            }
+            execute(commandLine, onOutputChunk)
+        } finally {
+            currentDirectory = prevCurrent
+            activeVenvDir = prevActiveVenv
+        }
+    }
+
+    suspend fun execute(commandLine: String, onOutputChunk: ((String) -> Unit)? = null): String = withContext(Dispatchers.IO) {
         val trimmed = commandLine.trim()
         if (trimmed.isEmpty()) return@withContext ""
         commandHistory.add(trimmed)
@@ -101,6 +134,7 @@ class LocalhostCli @Inject constructor(
                 "stat" -> handleStat(args)
                 "wc" -> handleWc(args)
                 "mkdir" -> handleMkdir(args)
+                "rmdir" -> handleRmdir(args)
                 "touch" -> handleTouch(args)
                 "cp" -> handleCp(args)
                 "mv" -> handleMv(args)
@@ -132,15 +166,18 @@ class LocalhostCli @Inject constructor(
                 "tunnel" -> handleTunnel(args.firstOrNull(), isJson)
                 "curl", "wget" -> handleCurl(args)
                 "chmod" -> handleChmod(args)
-                "composer" -> handleComposer(args)
-                "java" -> handleRuntimeExec(RuntimeType.JAVA, args)
-                "python", "python3" -> handleRuntimeExec(RuntimeType.PYTHON, args)
-                "pip", "pip3" -> handleRuntimeExec(RuntimeType.PYTHON, listOf("-m", "pip") + args)
-                "node" -> handleRuntimeExec(RuntimeType.NODEJS, args)
-                "npm" -> handleRuntimeExec(RuntimeType.NODEJS, listOf("npm") + args)
-                "php" -> handleRuntimeExec(RuntimeType.PHP, args)
-                "exec" -> handleCustomExec(args)
-                else -> handleFallbackExec(root, args)
+                "source", "." -> handleSource(args)
+                "activate" -> handleActivate(args)
+                "deactivate" -> handleDeactivate()
+                "composer" -> handleComposer(args, onOutputChunk)
+                "java" -> handleRuntimeExec(RuntimeType.JAVA, args, onOutputChunk)
+                "python", "python3" -> handleRuntimeExec(RuntimeType.PYTHON, args, onOutputChunk)
+                "pip", "pip3" -> handleRuntimeExec(RuntimeType.PYTHON, listOf("-m", "pip") + args, onOutputChunk)
+                "node" -> handleRuntimeExec(RuntimeType.NODEJS, args, onOutputChunk)
+                "npm" -> handleRuntimeExec(RuntimeType.NODEJS, listOf("npm") + args, onOutputChunk)
+                "php" -> handleRuntimeExec(RuntimeType.PHP, args, onOutputChunk)
+                "exec" -> handleCustomExec(args, onOutputChunk)
+                else -> handleFallbackExec(root, args, onOutputChunk)
             }
         } catch (e: Exception) {
             "Error: ${e.message}"
@@ -308,18 +345,44 @@ Modify: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS z", Locale.US).format(Date(f
         return ""
     }
 
-    private fun handleTouch(args: List<String>): String {
-        if (args.isEmpty()) return "touch: missing file operand"
-        args.forEach { filePath ->
-            val f = resolveFile(filePath)
-            if (f.exists()) {
-                f.setLastModified(System.currentTimeMillis())
+    private fun handleRmdir(args: List<String>): String {
+        val targets = args.filter { !it.startsWith("-") }
+        if (targets.isEmpty()) return "rmdir: missing operand"
+        val errors = mutableListOf<String>()
+        targets.forEach { targetPath ->
+            val dir = resolveFile(targetPath)
+            if (!dir.exists()) {
+                errors.add("rmdir: failed to remove '$targetPath': No such file or directory")
+            } else if (!dir.isDirectory) {
+                errors.add("rmdir: failed to remove '$targetPath': Not a directory")
             } else {
-                f.parentFile?.mkdirs()
-                f.createNewFile()
+                val deleted = dir.deleteRecursively()
+                if (!deleted) {
+                    errors.add("rmdir: failed to remove '$targetPath': Failed to remove directory")
+                }
             }
         }
-        return ""
+        return errors.joinToString("\n")
+    }
+
+    private fun handleTouch(args: List<String>): String {
+        val targets = args.filter { !it.startsWith("-") }
+        if (targets.isEmpty()) return "touch: missing file operand"
+        val errors = mutableListOf<String>()
+        targets.forEach { filePath ->
+            try {
+                val f = resolveFile(filePath)
+                if (f.exists()) {
+                    f.setLastModified(System.currentTimeMillis())
+                } else {
+                    f.parentFile?.mkdirs()
+                    f.createNewFile()
+                }
+            } catch (e: Exception) {
+                errors.add("touch: cannot touch '$filePath': ${e.message}")
+            }
+        }
+        return errors.joinToString("\n")
     }
 
     private fun handleCp(args: List<String>): String {
@@ -409,6 +472,24 @@ Filesystem      Size  Used  Avail Use% Mounted on
 
     private fun handleWhich(binary: String?): String {
         if (binary == null) return ""
+        if (binary == "python" || binary == "python3") {
+            val venvPython = activeVenvDir?.let { File(it, "bin/python") }?.takeIf { it.exists() }
+                ?: listOf(
+                    File(currentDirectory, "myenv/bin/python"),
+                    File(currentDirectory, ".venv/bin/python"),
+                    File(currentDirectory, "venv/bin/python")
+                ).firstOrNull { it.exists() }
+            if (venvPython != null) return venvPython.absolutePath
+        }
+        if (binary == "pip" || binary == "pip3") {
+            val venvPip = activeVenvDir?.let { File(it, "bin/pip") }?.takeIf { it.exists() }
+                ?: listOf(
+                    File(currentDirectory, "myenv/bin/pip"),
+                    File(currentDirectory, ".venv/bin/pip"),
+                    File(currentDirectory, "venv/bin/pip")
+                ).firstOrNull { it.exists() }
+            if (venvPip != null) return venvPip.absolutePath
+        }
         val runtimeType = when (binary.lowercase()) {
             "python", "python3" -> RuntimeType.PYTHON
             "node", "npm" -> RuntimeType.NODEJS
@@ -421,6 +502,42 @@ Filesystem      Size  Used  Avail Use% Mounted on
             if (exec != null) return exec
         }
         return "which: no $binary in internal environment"
+    }
+
+    private fun handleSource(args: List<String>): String {
+        if (args.isEmpty()) return "source: filename argument required\nsource: usage: source filename [arguments]"
+        return handleActivate(args)
+    }
+
+    private fun handleActivate(args: List<String>): String {
+        val arg = args.firstOrNull() ?: ".venv"
+        val file = resolveFile(arg)
+        val venvDir = when {
+            File(file, "bin/python").exists() || File(file, "bin/activate").exists() -> file
+            file.name == "activate" && file.parentFile?.name == "bin" -> file.parentFile?.parentFile
+            file.name == "bin" && File(file, "activate").exists() -> file.parentFile
+            File(file.parentFile, "bin/python").exists() -> file.parentFile
+            else -> listOf(
+                resolveFile(".venv"),
+                resolveFile("myenv"),
+                resolveFile("venv"),
+                File(currentDirectory, ".venv"),
+                File(currentDirectory, "myenv"),
+                File(currentDirectory, "venv")
+            ).firstOrNull { File(it, "bin/python").exists() || File(it, "bin/activate").exists() }
+        }
+
+        if (venvDir != null && venvDir.exists()) {
+            activeVenvDir = venvDir
+            return "Virtual environment (${venvDir.name}) activated."
+        }
+        return "Could not find virtual environment at '$arg'"
+    }
+
+    private fun handleDeactivate(): String {
+        val prev = activeVenvDir?.name
+        activeVenvDir = null
+        return if (prev != null) "Deactivated virtual environment ($prev)." else "No virtual environment currently active."
     }
 
     private fun handleRedirection(commandLine: String): String? {
@@ -441,36 +558,88 @@ Filesystem      Size  Used  Avail Use% Mounted on
         return ""
     }
 
-    private suspend fun handleRuntimeExec(runtime: RuntimeType, args: List<String>): String {
-        val execPath = runtimeManager.getExecutablePath(runtime)
+    private fun getDefaultTerminalEnvironment(runtime: RuntimeType = RuntimeType.PYTHON): Map<String, String> {
+        val env = mutableMapOf<String, String>()
+        val baseEnv = runtimeManager.getEnvironmentForRuntime(runtime)
+        env.putAll(baseEnv)
+        env["PYTHONUNBUFFERED"] = "1"
+        val venvDir = activeVenvDir?.takeIf { it.exists() } ?: listOf(
+            File(currentDirectory, "myenv"),
+            File(currentDirectory, ".venv"),
+            File(currentDirectory, "venv")
+        ).firstOrNull { File(it, "bin/python").exists() }
+        if (venvDir != null) {
+            val venvBin = File(venvDir, "bin").absolutePath
+            val curPath = env["PATH"] ?: (System.getenv("PATH") ?: "/system/bin")
+            env["PATH"] = "$venvBin:$curPath"
+            env["VIRTUAL_ENV"] = venvDir.absolutePath
+            val sitePkgs = File(venvDir, "lib/python3.14/site-packages")
+            if (sitePkgs.exists()) {
+                val curPyPath = env["PYTHONPATH"] ?: ""
+                env["PYTHONPATH"] = "${sitePkgs.absolutePath}:${currentDirectory.absolutePath}:$curPyPath"
+            }
+        }
+        return env
+    }
+
+    private suspend fun handleRuntimeExec(
+        runtime: RuntimeType,
+        args: List<String>,
+        onOutputChunk: ((String) -> Unit)? = null
+    ): String {
+        val venvPython = if (runtime == RuntimeType.PYTHON) {
+            activeVenvDir?.let { File(it, "bin/python") }?.takeIf { it.exists() } ?: listOf(
+                File(currentDirectory, "myenv/bin/python"),
+                File(currentDirectory, ".venv/bin/python"),
+                File(currentDirectory, "venv/bin/python")
+            ).firstOrNull { it.exists() }
+        } else null
+
+        val execPath = venvPython?.absolutePath ?: runtimeManager.getExecutablePath(runtime)
             ?: return "${runtime.displayName} runtime is not installed. Download it from Settings."
-        val env = runtimeManager.getEnvironmentForRuntime(runtime)
+        val env = getDefaultTerminalEnvironment(runtime)
         val fullCmd = if (args.firstOrNull() == "npm") {
             val npmFile = File(File(execPath).parentFile, "npm")
             listOf(npmFile.absolutePath) + args.drop(1)
         } else {
             listOf(execPath) + args
         }
-        return runProcess(fullCmd, currentDirectory, env)
+        return runProcess(fullCmd, currentDirectory, env, onOutputChunk)
     }
 
-    private suspend fun handleCustomExec(args: List<String>): String {
+    private suspend fun handleCustomExec(
+        args: List<String>,
+        onOutputChunk: ((String) -> Unit)? = null
+    ): String {
         if (args.isEmpty()) return "exec: missing executable path"
         val bin = resolveFile(args[0])
         if (!bin.exists()) return "exec: ${args[0]}: No such file"
         bin.setExecutable(true, false)
-        return runProcess(listOf(bin.absolutePath) + args.drop(1), currentDirectory, emptyMap())
+        return runProcess(listOf(bin.absolutePath) + args.drop(1), currentDirectory, getDefaultTerminalEnvironment(), onOutputChunk)
     }
 
-    private suspend fun handleFallbackExec(root: String, args: List<String>): String {
+    private suspend fun handleFallbackExec(
+        root: String,
+        args: List<String>,
+        onOutputChunk: ((String) -> Unit)? = null
+    ): String {
         val binInCur = File(currentDirectory, root)
         if (binInCur.exists() && binInCur.canExecute()) {
-            return runProcess(listOf(binInCur.absolutePath) + args, currentDirectory, emptyMap())
+            return runProcess(listOf(binInCur.absolutePath) + args, currentDirectory, getDefaultTerminalEnvironment(), onOutputChunk)
+        }
+        val binResolved = resolveFile(root)
+        if (binResolved.exists() && binResolved.canExecute()) {
+            return runProcess(listOf(binResolved.absolutePath) + args, currentDirectory, getDefaultTerminalEnvironment(), onOutputChunk)
         }
         return "localhost: command not found: $root (type 'help' for built-in tools)"
     }
 
-    private suspend fun runProcess(cmd: List<String>, workDir: File, env: Map<String, String>): String = withContext(Dispatchers.IO) {
+    private suspend fun runProcess(
+        cmd: List<String>,
+        workDir: File,
+        env: Map<String, String>,
+        onOutputChunk: ((String) -> Unit)? = null
+    ): String = withContext(Dispatchers.IO) {
         try {
             val pb = ProcessBuilder(cmd)
             pb.directory(workDir)
@@ -480,17 +649,30 @@ Filesystem      Size  Used  Avail Use% Mounted on
             val proc = pb.start()
             activeSubProcess = proc
 
-            val reader = BufferedReader(InputStreamReader(proc.inputStream))
+            val reader = InputStreamReader(proc.inputStream)
+            val buffer = CharArray(1024)
             val output = StringBuilder()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                output.append(line).append("\n")
+            var read: Int
+            while (reader.read(buffer).also { read = it } != -1) {
+                val chunk = String(buffer, 0, read)
+                output.append(chunk)
+                if (onOutputChunk != null) {
+                    withContext(Dispatchers.Main) {
+                        onOutputChunk(chunk)
+                    }
+                }
             }
             proc.waitFor()
             activeSubProcess = null
             output.toString().trimEnd()
         } catch (e: Exception) {
-            "Process error: ${e.message}"
+            val err = "Process error: ${e.message}"
+            if (onOutputChunk != null) {
+                withContext(Dispatchers.Main) {
+                    onOutputChunk(err)
+                }
+            }
+            err
         }
     }
 
@@ -633,6 +815,20 @@ Working Dir      : ${getCurrentPath()}
                 RuntimeType.JAVA -> "java -jar app.jar"
             }
         )
+        if (runtime == RuntimeType.PYTHON) {
+            val pyExec = runtimeManager.getExecutablePath(RuntimeType.PYTHON)
+            if (pyExec != null) {
+                val pyEnv = runtimeManager.getEnvironmentForRuntime(RuntimeType.PYTHON)
+                val venvDir = File(projectDir, ".venv")
+                try {
+                    val pb = ProcessBuilder(pyExec, "-m", "venv", "--system-site-packages", venvDir.absolutePath)
+                    pb.directory(projectDir)
+                    pb.environment().putAll(pyEnv)
+                    val proc = pb.start()
+                    proc.waitFor()
+                } catch (_: Exception) {}
+            }
+        }
         projectRepository.save(project)
         return "Created project '$name' ($runtime) on port $port at /projects/$name."
     }
@@ -730,7 +926,6 @@ Localhost CLI Commands:
     tunnel <start|stop|status> Manage Cloudflare tunnel
 """.trimIndent()
 
-
     private fun handleCurl(args: List<String>): String {
         if (args.isEmpty()) return "curl: try 'curl --help' or specify a URL"
         var outputFile: String? = null
@@ -793,13 +988,16 @@ Localhost CLI Commands:
         return ""
     }
 
-    private suspend fun handleComposer(args: List<String>): String {
+    private suspend fun handleComposer(
+        args: List<String>,
+        onOutputChunk: ((String) -> Unit)? = null
+    ): String {
         val phpPath = runtimeManager.getExecutablePath(RuntimeType.PHP)
             ?: return "composer: PHP runtime is not installed. Install PHP from Settings -> Runtimes."
         val composerPhar = File(context.filesDir, "bin/composer.phar")
         if (!composerPhar.exists()) {
             return "composer: composer.phar not found. Download Composer from Settings or use composer download."
         }
-        return handleCustomExec(listOf(phpPath, composerPhar.absolutePath) + args)
+        return handleCustomExec(listOf(phpPath, composerPhar.absolutePath) + args, onOutputChunk)
     }
 }

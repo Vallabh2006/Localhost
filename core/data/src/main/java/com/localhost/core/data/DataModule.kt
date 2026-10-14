@@ -6,6 +6,7 @@ import com.localhost.core.data.database.LocalhostDatabase
 import com.localhost.core.data.database.LogDao
 import com.localhost.core.data.database.MetricsDao
 import com.localhost.core.data.database.ProjectDao
+import com.localhost.core.data.database.RequestRecordDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -35,4 +36,7 @@ object DataModule {
 
     @Provides
     fun provideMetricsDao(database: LocalhostDatabase): MetricsDao = database.metricsDao()
+
+    @Provides
+    fun provideRequestRecordDao(database: LocalhostDatabase): RequestRecordDao = database.requestRecordDao()
 }

@@ -38,6 +38,7 @@ dependencies {
     implementation(project(":runtime:process"))
     implementation(project(":runtime:templates"))
     implementation(project(":tunnel"))
+    implementation(project(":cli"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.material3)

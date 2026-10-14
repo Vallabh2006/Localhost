@@ -10,6 +10,7 @@ import com.localhost.core.model.Project
 import com.localhost.core.model.ProjectStatus
 import com.localhost.core.model.RestartPolicy
 import com.localhost.core.model.RuntimeType
+import com.localhost.core.model.RequestRecord
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -148,4 +149,41 @@ data class MetricSampleEntity(
     val diskUsageBytes: Long,
     val networkRxBytes: Long,
     val networkTxBytes: Long
+)
+
+@Entity(tableName = "request_records")
+data class RequestRecordEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val projectId: String,
+    val timestamp: Long,
+    val method: String,
+    val path: String,
+    val statusCode: Int,
+    val responseBytes: Long,
+    val durationMs: Long,
+    val errorMessage: String?
+)
+
+fun RequestRecordEntity.toDomain(): RequestRecord = RequestRecord(
+    id = id,
+    projectId = projectId,
+    timestamp = timestamp,
+    method = method,
+    path = path,
+    statusCode = statusCode,
+    responseBytes = responseBytes,
+    durationMs = durationMs,
+    errorMessage = errorMessage
+)
+
+fun RequestRecord.toEntity(): RequestRecordEntity = RequestRecordEntity(
+    id = id,
+    projectId = projectId,
+    timestamp = timestamp,
+    method = method,
+    path = path,
+    statusCode = statusCode,
+    responseBytes = responseBytes,
+    durationMs = durationMs,
+    errorMessage = errorMessage
 )

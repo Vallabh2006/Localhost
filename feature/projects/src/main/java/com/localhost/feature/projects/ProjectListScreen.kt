@@ -1,4 +1,5 @@
 package com.localhost.feature.projects
+import androidx.compose.foundation.layout.WindowInsets
 
 import com.localhost.core.designsystem.theme.StatusGreen
 import com.localhost.core.designsystem.theme.StatusRed
@@ -124,6 +125,7 @@ fun ProjectListScreen(
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var qrDialogUrl by remember { mutableStateOf<String?>(null) }
+    var browserPreviewUrl by remember { mutableStateOf<String?>(null) }
     var showGithubDialog by remember { mutableStateOf(false) }
     var githubUrlInput by remember { mutableStateOf("") }
     var githubCustomName by remember { mutableStateOf("") }
@@ -157,6 +159,7 @@ fun ProjectListScreen(
 
     Scaffold(
         containerColor = DarkBackground,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -214,8 +217,7 @@ fun ProjectListScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = DarkSurface,
                     titleContentColor = TextPrimary
-                ),
-                modifier = Modifier.height(48.dp)
+                )
             )
         },
         floatingActionButton = {
@@ -313,10 +315,7 @@ fun ProjectListScreen(
                             onOpenBrowser = {
                                 val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
                                 val url = "http://$ip:${project.port}"
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                }
-                                context.startActivity(intent)
+                                browserPreviewUrl = url
                             }
                         )
                     }
@@ -345,10 +344,7 @@ fun ProjectListScreen(
                             onOpenBrowser = {
                                 val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
                                 val url = "http://$ip:${project.port}"
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                }
-                                context.startActivity(intent)
+                                browserPreviewUrl = url
                             }
                         )
                     }
@@ -357,7 +353,6 @@ fun ProjectListScreen(
         }
     }
 
-    
     if (showGithubDialog) {
         AlertDialog(
             onDismissRequest = { showGithubDialog = false },
@@ -521,10 +516,9 @@ fun ProjectListScreen(
 
                     Button(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            context.startActivity(intent)
+                            val target = qrDialogUrl ?: url
+                            qrDialogUrl = null
+                            browserPreviewUrl = target
                         },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
@@ -542,6 +536,13 @@ fun ProjectListScreen(
                     Text("Close", color = TextSecondary)
                 }
             }
+        )
+    }
+
+    browserPreviewUrl?.let { url ->
+        InAppBrowserDialog(
+            initialUrl = url,
+            onDismiss = { browserPreviewUrl = null }
         )
     }
 }
@@ -642,53 +643,53 @@ private fun ProjectCardItem(
 
                     if (isRunning) {
                         Spacer(modifier = Modifier.width(4.dp))
-                        IconButton(onClick = onOpenBrowser, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open in Browser", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                        IconButton(onClick = onOpenBrowser, modifier = Modifier.size(38.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open in Browser", tint = PrimaryAccent, modifier = Modifier.size(20.dp))
                         }
-                        IconButton(onClick = onQrClick, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.QrCode, contentDescription = "QR Code", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        IconButton(onClick = onQrClick, modifier = Modifier.size(38.dp)) {
+                            Icon(Icons.Default.QrCode, contentDescription = "QR Code", tint = TextSecondary, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (isRunning) {
                         Button(
                             onClick = onStopClick,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
-                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.height(30.dp)
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.25f)),
+                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.7f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Stop", color = StatusRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Stop", color = StatusRed, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                         OutlinedButton(
                             onClick = onRestartClick,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(0.dp),
+                            shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, DarkBorderSubtle),
-                            modifier = Modifier.height(30.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = PrimaryAccent, modifier = Modifier.size(20.dp))
                         }
                     } else {
                         Button(
                             onClick = onStartClick,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = StatusGreen.copy(alpha = 0.25f)),
-                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.6f)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.height(30.dp)
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusGreen.copy(alpha = 0.3f)),
+                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.8f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Start", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Start Server", color = StatusGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
