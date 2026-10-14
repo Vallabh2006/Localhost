@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -200,15 +199,9 @@ fun DatabaseScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isMysqlConnected) StatusGreen else StatusRed)
-                        )
                         Column {
                             Text("MySQL", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isMySqlSel) PrimaryAccent else TextPrimary)
-                            Text("Port 3306 | ${if (isMysqlConnected) "Running" else "Stopped"}", fontSize = 10.sp, color = TextMuted)
+                            Text(if (isMysqlConnected) "Port 3306 (Running)" else "Port 3306 (Stopped)", fontSize = 10.sp, color = TextMuted)
                         }
                     }
                 }
@@ -227,15 +220,9 @@ fun DatabaseScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isPostgresConnected) StatusGreen else StatusRed)
-                        )
                         Column {
                             Text("PostgreSQL", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isPgSel) PrimaryAccent else TextPrimary)
-                            Text("Port 5432 | ${if (isPostgresConnected) "Running" else "Stopped"}", fontSize = 10.sp, color = TextMuted)
+                            Text(if (isPostgresConnected) "Port 5432 (Running)" else "Port 5432 (Stopped)", fontSize = 10.sp, color = TextMuted)
                         }
                     }
                 }
@@ -566,12 +553,6 @@ private fun DatabaseDashboardTab(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(if (isConnected) StatusGreen else StatusRed)
-                        )
                         Column {
                             Text(
                                 text = if (engine == DatabaseEngine.MYSQL) "MySQL Service" else "PostgreSQL Service",
@@ -580,7 +561,7 @@ private fun DatabaseDashboardTab(
                                 color = TextPrimary
                             )
                             Text(
-                                text = "Port ${config.port} • ${if (isConnected) "Active" else "Stopped"}",
+                                text = if (isConnected) "Port ${config.port} (Active)" else "Port ${config.port} (Stopped)",
                                 fontSize = 11.sp,
                                 color = TextMuted
                             )
@@ -1288,7 +1269,7 @@ private fun QueryConsoleTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val quickQueries = listOf(
-                "SELECT REPLACE(REPEAT('cat\\n', 25), '\\n', CHAR(10));",
+                "SELECT current_timestamp;",
                 "SELECT * FROM users LIMIT 20;",
                 "SELECT * FROM accounts;",
                 "SELECT version();",
