@@ -300,7 +300,7 @@ app.listen(port, '0.0.0.0', () => {
                 id = "php-basic",
                 name = "PHP Demo App",
                 runtime = RuntimeType.PHP,
-                description = "PHP web application running with native internal template evaluation.",
+                description = "PHP web application running with native PHP server engine (XAMPP-like SAPI).",
                 defaultStartupCommand = "builtin",
                 defaultFiles = mapOf(
                     "index.php" to """
