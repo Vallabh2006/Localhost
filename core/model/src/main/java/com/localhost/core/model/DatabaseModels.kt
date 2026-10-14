@@ -3,8 +3,7 @@ package com.localhost.core.model
 import kotlinx.serialization.Serializable
 
 enum class DatabaseEngine(val displayName: String, val defaultPort: Int, val defaultUser: String) {
-    MYSQL("MySQL", 3306, "root"),
-    POSTGRESQL("PostgreSQL", 5432, "postgres")
+    MYSQL("MariaDB / MySQL", 3306, "root")
 }
 
 @Serializable

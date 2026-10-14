@@ -14,6 +14,7 @@ import com.localhost.core.model.DatabaseEngine
 import com.localhost.core.model.DatabaseUser
 import com.localhost.core.model.QueryResult
 import com.localhost.core.model.TableData
+import com.localhost.runtime.manager.MariaDBManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,27 +33,22 @@ data class TableSchemaEntry(
 
 @HiltViewModel
 class DatabaseViewModel @Inject constructor(
-    private val databaseClient: DatabaseClient
+    private val databaseClient: DatabaseClient,
+    private val mariaDBManager: MariaDBManager
 ) : ViewModel() {
 
     companion object {
         private val _selectedEngine = MutableStateFlow(DatabaseEngine.MYSQL)
-        private val _mysqlConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.MYSQL, port = 3306, user = "root", password = ""))
-        private val _postgresConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.POSTGRESQL, port = 5432, user = "root", password = ""))
+        private val _mysqlConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.MYSQL, port = 3306, user = "root", password = "", database = ""))
         private val _isMysqlConnected = MutableStateFlow(false)
-        private val _isPostgresConnected = MutableStateFlow(false)
-        private val _mysqlMessage = MutableStateFlow<String?>("MySQL Service stopped")
-        private val _postgresMessage = MutableStateFlow<String?>("PostgreSQL Service stopped")
-        private val _databaseLogs = MutableStateFlow<List<String>>(listOf("[SYSTEM] Database Studio initialized. Services currently stopped."))
+        private val _mysqlMessage = MutableStateFlow<String?>("MariaDB Service Stopped")
+        private val _databaseLogs = MutableStateFlow<List<String>>(listOf("[SYSTEM] Database Studio initialized."))
     }
 
     val selectedEngine: StateFlow<DatabaseEngine> = _selectedEngine.asStateFlow()
     val mysqlConfig: StateFlow<DatabaseConfig> = _mysqlConfig.asStateFlow()
-    val postgresConfig: StateFlow<DatabaseConfig> = _postgresConfig.asStateFlow()
     val isMysqlConnected: StateFlow<Boolean> = _isMysqlConnected.asStateFlow()
-    val isPostgresConnected: StateFlow<Boolean> = _isPostgresConnected.asStateFlow()
     val mysqlMessage: StateFlow<String?> = _mysqlMessage.asStateFlow()
-    val postgresMessage: StateFlow<String?> = _postgresMessage.asStateFlow()
     private val _testConnectionResult = MutableStateFlow<String?>(null)
     val testConnectionResult: StateFlow<String?> = _testConnectionResult.asStateFlow()
     val databaseLogs: StateFlow<List<String>> = _databaseLogs.asStateFlow()
@@ -60,13 +56,13 @@ class DatabaseViewModel @Inject constructor(
     private val _databases = MutableStateFlow<List<String>>(emptyList())
     val databases: StateFlow<List<String>> = _databases.asStateFlow()
 
-    private val _selectedDatabase = MutableStateFlow("localhost_app")
+    private val _selectedDatabase = MutableStateFlow("cats_db")
     val selectedDatabase: StateFlow<String> = _selectedDatabase.asStateFlow()
 
     private val _tables = MutableStateFlow<List<String>>(emptyList())
     val tables: StateFlow<List<String>> = _tables.asStateFlow()
 
-    private val _selectedTable = MutableStateFlow<String?>("users")
+    private val _selectedTable = MutableStateFlow<String?>("cats")
     val selectedTable: StateFlow<String?> = _selectedTable.asStateFlow()
 
     private val _tableSchema = MutableStateFlow<List<ColumnInfo>>(emptyList())
@@ -87,16 +83,35 @@ class DatabaseViewModel @Inject constructor(
     private val _isExecuting = MutableStateFlow(false)
     val isExecuting: StateFlow<Boolean> = _isExecuting.asStateFlow()
 
+    val isMariaDBDownloading: StateFlow<Boolean> = mariaDBManager.isDownloading
+    val mariaDBProgress: StateFlow<Float> = mariaDBManager.downloadProgress
+    val mariaDBStatusMessage: StateFlow<String?> = mariaDBManager.statusMessage
+
     init {
-        loadDatabases()
-        loadUsers()
+        checkServiceStatus()
+    }
+
+    fun isMariaDBInstalled(): Boolean = mariaDBManager.isInstalled()
+
+    fun checkServiceStatus() {
+        viewModelScope.launch {
+            val isPortOpen = mariaDBManager.checkIsPortOpen()
+            _isMysqlConnected.value = isPortOpen
+            if (isPortOpen) {
+                _mysqlMessage.value = "MariaDB Server is running on 127.0.0.1:3306"
+                loadDatabases()
+                loadUsers()
+            } else {
+                _mysqlMessage.value = "MariaDB Service Stopped"
+            }
+        }
     }
 
     val activeConfig: DatabaseConfig
-        get() = if (_selectedEngine.value == DatabaseEngine.MYSQL) _mysqlConfig.value else _postgresConfig.value
+        get() = _mysqlConfig.value
 
     val isConnected: Boolean
-        get() = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
+        get() = _isMysqlConnected.value
 
     fun addLog(msg: String) {
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
@@ -108,39 +123,35 @@ class DatabaseViewModel @Inject constructor(
         _databaseLogs.value = listOf("[$timestamp] [SYSTEM] Logs cleared")
     }
 
-    fun selectService(engine: DatabaseEngine) {
-        _selectedEngine.value = engine
-        addLog("[ENGINE] Switched active studio engine to ${engine.displayName}")
-        loadDatabases()
-        loadUsers()
+    fun updateConfig(host: String, port: Int, user: String, pass: String, db: String) {
+        _mysqlConfig.value = _mysqlConfig.value.copy(
+            host = host.trim(),
+            port = port,
+            user = user.trim(),
+            password = pass,
+            database = db.trim()
+        )
+        addLog("[CONFIG] Updated connection parameters for MariaDB")
     }
 
-    fun updateConfig(host: String, port: Int, user: String, pass: String, db: String) {
-        if (_selectedEngine.value == DatabaseEngine.MYSQL) {
-            _mysqlConfig.value = _mysqlConfig.value.copy(
-                host = host.trim(),
-                port = port,
-                user = user.trim(),
-                password = pass,
-                database = db.trim()
-            )
-        } else {
-            _postgresConfig.value = _postgresConfig.value.copy(
-                host = host.trim(),
-                port = port,
-                user = user.trim(),
-                password = pass,
-                database = db.trim()
-            )
+    fun installMariaDB() {
+        viewModelScope.launch {
+            _isExecuting.value = true
+            addLog("[INSTALL] Starting MariaDB runtime installation...")
+            val res = mariaDBManager.installMariaDB()
+            if (res.isSuccess) {
+                addLog("[INSTALL] MariaDB installed successfully")
+                connect()
+            } else {
+                addLog("[ERROR] MariaDB install failed: ${res.exceptionOrNull()?.message}")
+            }
+            _isExecuting.value = false
         }
-        addLog("[CONFIG] Updated connection parameters for ${_selectedEngine.value.displayName}")
     }
 
     fun testConnection() {
-        val eng = _selectedEngine.value
-        val isRunning = if (eng == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
-        if (!isRunning) {
-            val err = "Failed: ${eng.displayName} service is stopped. Start the service first."
+        if (!_isMysqlConnected.value) {
+            val err = "Failed: MariaDB service is stopped. Start the service first."
             _testConnectionResult.value = err
             addLog("[WARN] Connection test blocked: $err")
             return
@@ -169,142 +180,182 @@ class DatabaseViewModel @Inject constructor(
     fun connect() {
         viewModelScope.launch {
             _isExecuting.value = true
-            val eng = _selectedEngine.value
-            val cfg = activeConfig
-            val res = databaseClient.testConnection(cfg)
-            if (res.isSuccess) {
-                if (eng == DatabaseEngine.MYSQL) {
-                    _isMysqlConnected.value = true
-                    _mysqlMessage.value = res.getOrNull()
-                } else {
-                    _isPostgresConnected.value = true
-                    _postgresMessage.value = res.getOrNull()
-                }
-                addLog("[SERVICE] ${eng.displayName} service started on ${cfg.host}:${cfg.port}")
+            addLog("[SERVICE] Starting MariaDB server daemon...")
+            val startRes = mariaDBManager.startService()
+            if (startRes.isSuccess) {
+                _isMysqlConnected.value = true
+                _mysqlMessage.value = "MariaDB running on 127.0.0.1:3306"
+                addLog("[SERVICE] MariaDB service active on port 3306")
                 loadDatabases()
+                loadUsers()
             } else {
-                val err = res.exceptionOrNull()?.message ?: "Connection refused"
-                if (eng == DatabaseEngine.MYSQL) {
-                    _isMysqlConnected.value = false
-                    _mysqlMessage.value = err
-                } else {
-                    _isPostgresConnected.value = false
-                    _postgresMessage.value = err
-                }
-                addLog("[ERROR] Failed to start ${eng.displayName} service: $err")
+                _isMysqlConnected.value = false
+                val err = startRes.exceptionOrNull()?.message ?: "Failed to start service"
+                _mysqlMessage.value = err
+                addLog("[ERROR] MariaDB start failed: $err")
             }
             _isExecuting.value = false
         }
     }
 
     fun disconnect() {
-        val eng = _selectedEngine.value
-        if (eng == DatabaseEngine.MYSQL) {
+        viewModelScope.launch {
+            _isExecuting.value = true
+            addLog("[SERVICE] Stopping MariaDB server daemon...")
+            mariaDBManager.stopService()
             _isMysqlConnected.value = false
-            _mysqlMessage.value = "MySQL Service stopped"
-        } else {
-            _isPostgresConnected.value = false
-            _postgresMessage.value = "PostgreSQL Service stopped"
+            _mysqlMessage.value = "MariaDB Service stopped"
+            addLog("[SERVICE] MariaDB service stopped")
+            _isExecuting.value = false
         }
-        addLog("[SERVICE] ${eng.displayName} service stopped")
     }
 
     fun restartService() {
         viewModelScope.launch {
-            val eng = _selectedEngine.value
-            addLog("[SERVICE] Restarting ${eng.displayName} service...")
+            addLog("[SERVICE] Restarting MariaDB service...")
             disconnect()
-            kotlinx.coroutines.delay(350)
+            kotlinx.coroutines.delay(500)
             connect()
         }
     }
 
     fun loadDatabases() {
         viewModelScope.launch {
-            val dbs = databaseClient.listDatabases(_selectedEngine.value)
-            _databases.value = dbs
-            if (dbs.isNotEmpty() && !_databases.value.contains(_selectedDatabase.value)) {
-                _selectedDatabase.value = dbs.first()
+            val list = databaseClient.listDatabases(_selectedEngine.value)
+            _databases.value = list
+            if (list.isNotEmpty()) {
+                if (_selectedDatabase.value !in list) {
+                    val preferCat = if ("cats_db" in list) "cats_db" else list.first()
+                    _selectedDatabase.value = preferCat
+                }
+                loadTables(_selectedDatabase.value)
+                loadAllSchemas(_selectedDatabase.value)
+            } else {
+                _tables.value = emptyList()
+                _allTableSchemas.value = emptyList()
             }
-            loadTables(_selectedDatabase.value)
         }
     }
 
-    fun selectDatabase(db: String) {
-        _selectedDatabase.value = db
-        loadTables(db)
-        loadAllSchemas(db)
+    fun selectDatabase(name: String) {
+        _selectedDatabase.value = name
+        addLog("[DATABASE] Switched to database '$name'")
+        loadTables(name)
+        loadAllSchemas(name)
     }
 
-    fun loadTables(database: String) {
+    fun createDatabase(name: String) {
+        if (!_isMysqlConnected.value) {
+            addLog("[ERROR] Cannot create database: MariaDB service is offline")
+            return
+        }
         viewModelScope.launch {
-            val tbls = databaseClient.listTables(_selectedEngine.value, database)
-            _tables.value = tbls
-            val currentSelected = _selectedTable.value
-            val nextTable = if (tbls.contains(currentSelected)) currentSelected else tbls.firstOrNull()
-            _selectedTable.value = nextTable
-            if (nextTable != null) {
-                selectTable(database, nextTable)
+            val trimmed = name.trim().lowercase().replace(" ", "_")
+            if (trimmed.isEmpty()) return@launch
+            val res = databaseClient.executeQuery(_selectedEngine.value, "", "CREATE DATABASE IF NOT EXISTS `$trimmed`;")
+            if (res.isSuccess) {
+                addLog("[DATABASE] Created database '$trimmed'")
+                loadDatabases()
+                selectDatabase(trimmed)
             } else {
+                addLog("[ERROR] Failed to create database: ${res.errorMessage}")
+            }
+        }
+    }
+
+    fun dropDatabase(name: String) {
+        if (!_isMysqlConnected.value) {
+            addLog("[ERROR] Cannot drop database: MariaDB service is offline")
+            return
+        }
+        viewModelScope.launch {
+            val res = databaseClient.executeQuery(_selectedEngine.value, "", "DROP DATABASE IF EXISTS `$name`;")
+            if (res.isSuccess) {
+                addLog("[DATABASE] Dropped database '$name'")
+                loadDatabases()
+            } else {
+                addLog("[ERROR] Failed to drop database: ${res.errorMessage}")
+            }
+        }
+    }
+
+    fun loadTables(database: String = _selectedDatabase.value) {
+        viewModelScope.launch {
+            val list = databaseClient.listTables(_selectedEngine.value, database)
+            _tables.value = list
+            if (list.isNotEmpty()) {
+                if (_selectedTable.value !in list) {
+                    _selectedTable.value = list.first()
+                }
+                _selectedTable.value?.let { tbl ->
+                    loadTableSchema(database, tbl)
+                    loadTableData(database, tbl)
+                }
+            } else {
+                _selectedTable.value = null
                 _tableSchema.value = emptyList()
                 _tableData.value = null
             }
         }
     }
 
-    fun selectTable(database: String, table: String) {
-        _selectedTable.value = table
+    fun loadAllSchemas(database: String = _selectedDatabase.value) {
         viewModelScope.launch {
-            val eng = _selectedEngine.value
-            _tableSchema.value = databaseClient.getTableSchema(eng, database, table)
-            _tableData.value = databaseClient.getTableData(eng, database, table)
-        }
-    }
-
-    fun loadAllSchemas(database: String) {
-        viewModelScope.launch {
-            val eng = _selectedEngine.value
-            val tbls = databaseClient.listTables(eng, database)
+            val tables = databaseClient.listTables(_selectedEngine.value, database)
             val entries = mutableListOf<TableSchemaEntry>()
-            for (t in tbls) {
-                val cols = databaseClient.getTableSchema(eng, database, t)
-                val data = databaseClient.getTableData(eng, database, t)
-                entries.add(TableSchemaEntry(t, data.rows.size, cols))
+            for (tbl in tables) {
+                val schema = databaseClient.getTableSchema(_selectedEngine.value, database, tbl)
+                val data = databaseClient.getTableData(_selectedEngine.value, database, tbl)
+                entries.add(TableSchemaEntry(tableName = tbl, rowCount = data.rows.size, columns = schema))
             }
             _allTableSchemas.value = entries
         }
     }
 
+    fun selectTable(database: String, tableName: String) {
+        _selectedDatabase.value = database
+        selectTable(tableName)
+    }
+
+    fun selectTable(tableName: String) {
+        _selectedTable.value = tableName
+        addLog("[TABLE] Selected table '$tableName'")
+        loadTableSchema(_selectedDatabase.value, tableName)
+        loadTableData(_selectedDatabase.value, tableName)
+    }
+
+    fun loadTableSchema(database: String, table: String) {
+        viewModelScope.launch {
+            _tableSchema.value = databaseClient.getTableSchema(_selectedEngine.value, database, table)
+        }
+    }
+
+    fun loadTableData(database: String, table: String) {
+        viewModelScope.launch {
+            _tableData.value = databaseClient.getTableData(_selectedEngine.value, database, table)
+        }
+    }
+
     fun executeQuery(sql: String) {
-        if (sql.isBlank()) return
-        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
-        if (!isRunning) {
-            val engName = _selectedEngine.value.displayName
-            _queryResult.value = QueryResult(
-                columns = emptyList(),
-                rows = emptyList(),
-                affectedRows = 0,
-                executionTimeMs = 0,
-                isSuccess = false,
-                errorMessage = "Failed to execute query: ${engName} service is stopped. Start the service first from Dashboard to run queries."
-            )
-            addLog("[ERROR] Query blocked: ${engName} service is offline")
+        if (!_isMysqlConnected.value) {
+            val err = "Cannot execute query: MariaDB service is offline. Start the service first."
+            _queryResult.value = QueryResult(isSuccess = false, errorMessage = err)
+            addLog("[ERROR] $err")
             return
         }
         viewModelScope.launch {
             _isExecuting.value = true
-            addLog("[SQL] $sql")
             val res = databaseClient.executeQuery(_selectedEngine.value, _selectedDatabase.value, sql)
             _queryResult.value = res
+            val preview = sql.lines().firstOrNull() ?: sql
             if (res.isSuccess) {
-                addLog("[SQL-RESULT] Success (${res.affectedRows} rows, ${res.executionTimeMs}ms)")
+                addLog("[QUERY] OK (${res.executionTimeMs}ms) - $preview")
             } else {
-                addLog("[SQL-ERROR] ${res.errorMessage}")
+                addLog("[ERROR] (${res.executionTimeMs}ms) ${res.errorMessage} - $preview")
             }
             _isExecuting.value = false
-            loadDatabases()
-            _selectedTable.value?.let { selectTable(_selectedDatabase.value, it) }
-            loadUsers()
+            loadTables(_selectedDatabase.value)
+            loadAllSchemas(_selectedDatabase.value)
         }
     }
 
@@ -314,12 +365,9 @@ class DatabaseViewModel @Inject constructor(
         }
     }
 
-    fun createUser(username: String, host: String = "%", pass: String) {
-        if (username.isBlank()) return
-        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
-        if (!isRunning) {
-            val engName = _selectedEngine.value.displayName
-            addLog("[ERROR] Cannot create user: ${engName} service is offline")
+    fun createUser(username: String, host: String, pass: String) {
+        if (!_isMysqlConnected.value) {
+            addLog("[ERROR] Cannot create user: MariaDB service is offline")
             return
         }
         viewModelScope.launch {
@@ -330,10 +378,8 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun changePassword(username: String, newPass: String) {
-        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
-        if (!isRunning) {
-            val engName = _selectedEngine.value.displayName
-            addLog("[ERROR] Cannot change password: ${engName} service is offline")
+        if (!_isMysqlConnected.value) {
+            addLog("[ERROR] Cannot change password: MariaDB service is offline")
             return
         }
         viewModelScope.launch {
@@ -344,10 +390,8 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun deleteUser(username: String) {
-        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
-        if (!isRunning) {
-            val engName = _selectedEngine.value.displayName
-            addLog("[ERROR] Cannot delete user: ${engName} service is offline")
+        if (!_isMysqlConnected.value) {
+            addLog("[ERROR] Cannot delete user: MariaDB service is offline")
             return
         }
         viewModelScope.launch {
@@ -374,46 +418,38 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun generateSqlExport(database: String, includeData: Boolean): String {
-        val eng = _selectedEngine.value
         val sb = StringBuilder()
         sb.append("-- --------------------------------------------------------\n")
-        sb.append("-- Localhost SQL Dump\n")
-        sb.append("-- Service Engine: ${eng.displayName}\n")
+        sb.append("-- Localhost MariaDB SQL Dump\n")
         sb.append("-- Target Database: $database\n")
         sb.append("-- Generated: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}\n")
         sb.append("-- --------------------------------------------------------\n\n")
 
-        val quote = if (eng == DatabaseEngine.MYSQL) "`" else "\""
-        if (eng == DatabaseEngine.MYSQL) {
-            sb.append("CREATE DATABASE IF NOT EXISTS $quote$database$quote;\n")
-            sb.append("USE $quote$database$quote;\n\n")
-        } else {
-            sb.append("-- CREATE DATABASE $quote$database$quote;\n")
-            sb.append("\\c $database;\n\n")
-        }
+        sb.append("CREATE DATABASE IF NOT EXISTS `$database`;\n")
+        sb.append("USE `$database`;\n\n")
 
         val entries = _allTableSchemas.value
         for (entry in entries) {
             val tbl = entry.tableName
-            sb.append("-- Table structure for table $quote$tbl$quote\n")
-            sb.append("DROP TABLE IF EXISTS $quote$tbl$quote;\n")
-            sb.append("CREATE TABLE $quote$tbl$quote (\n")
+            sb.append("-- Table structure for table `$tbl`\n")
+            sb.append("DROP TABLE IF EXISTS `$tbl`;\n")
+            sb.append("CREATE TABLE `$tbl` (\n")
             val colDefs = entry.columns.map { c ->
                 val pkStr = if (c.isPrimaryKey) " PRIMARY KEY" else ""
                 val nullStr = if (!c.isNullable) " NOT NULL" else ""
-                "    $quote${c.name}$quote ${c.type}$pkStr$nullStr"
+                "    `${c.name}` ${c.type}$pkStr$nullStr"
             }
             sb.append(colDefs.joinToString(",\n"))
             sb.append("\n);\n\n")
 
             if (includeData) {
                 viewModelScope.launch {
-                    val data = databaseClient.getTableData(eng, database, tbl)
+                    val data = databaseClient.getTableData(DatabaseEngine.MYSQL, database, tbl)
                     if (data.rows.isNotEmpty()) {
-                        sb.append("-- Dumping data for table $quote$tbl$quote\n")
+                        sb.append("-- Dumping data for table `$tbl`\n")
                         for (row in data.rows) {
                             val vals = row.map { v -> if (v == "NULL") "NULL" else "'${v.replace("'", "''")}'" }
-                            sb.append("INSERT INTO $quote$tbl$quote (${data.columns.joinToString(", ") { "$quote$it$quote" }}) VALUES (${vals.joinToString(", ")});\n")
+                            sb.append("INSERT INTO `$tbl` (${data.columns.joinToString(", ") { "`$it`" }}) VALUES (${vals.joinToString(", ")});\n")
                         }
                         sb.append("\n")
                     }
@@ -424,11 +460,9 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun importSqlFile(context: Context, uri: Uri) {
-        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
-        if (!isRunning) {
-            val engName = _selectedEngine.value.displayName
-            Toast.makeText(context, "${engName} service is stopped. Start service first.", Toast.LENGTH_SHORT).show()
-            addLog("[ERROR] Cannot import SQL: ${engName} service is offline")
+        if (!_isMysqlConnected.value) {
+            Toast.makeText(context, "MariaDB service is stopped. Start service first.", Toast.LENGTH_SHORT).show()
+            addLog("[ERROR] Cannot import SQL: MariaDB service is offline")
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -440,7 +474,7 @@ class DatabaseViewModel @Inject constructor(
                     val statements = sqlContent.split(";")
                         .map { it.trim() }
                         .filter { it.isNotEmpty() && !it.startsWith("--") && !it.startsWith("/*") }
-                    
+
                     for (stmt in statements) {
                         databaseClient.executeQuery(_selectedEngine.value, _selectedDatabase.value, stmt)
                         executedCount++
@@ -452,7 +486,7 @@ class DatabaseViewModel @Inject constructor(
                 addLog("[IMPORT] Imported SQL: $executedCount statements executed")
                 loadDatabases()
                 loadAllSchemas(_selectedDatabase.value)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "SQL Import failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
@@ -490,7 +524,7 @@ class DatabaseViewModel @Inject constructor(
                     }
                 }
                 addLog("[EXPORT] Exported SQL dump for database '$database'")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }

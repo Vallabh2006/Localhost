@@ -1062,7 +1062,7 @@ private fun OverviewTabContent(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Cloudflare Tunnel Active",
+                            "Port Forwarding Active",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = StatusGreen
@@ -2404,9 +2404,11 @@ private fun ControlTab(
     viewModel: ProjectsViewModel,
     onBackClick: () -> Unit
 ) {
-    val tunnelStatus by viewModel.tunnelStatus.collectAsState()
-    val activeTunnelUrl by viewModel.activeTunnelUrl.collectAsState()
-    val tunnelError by viewModel.tunnelError.collectAsState()
+    val forwardingStatus by viewModel.forwardingStatus.collectAsState()
+    val forwardingActiveUrl by viewModel.forwardingActiveUrl.collectAsState()
+    val forwardingError by viewModel.forwardingError.collectAsState()
+    val tokenTunnelStatus by viewModel.tokenTunnelStatus.collectAsState()
+    val tokenError by viewModel.tokenError.collectAsState()
     val vpnDisabled by viewModel.isVpnDisabled(project.id).collectAsState(initial = false)
     val vpnBlockedMsgFlow by viewModel.getVpnBlockedMessage(project.id).collectAsState(initial = "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer.")
     var vpnBlockedMsg by remember(vpnBlockedMsgFlow) { mutableStateOf(vpnBlockedMsgFlow) }
@@ -2419,8 +2421,8 @@ private fun ControlTab(
     var showForwardPortDialog by remember { mutableStateOf(false) }
     var forwardPortInput by remember(project.port) { mutableStateOf(project.port.toString()) }
     val forwardedPort by viewModel.forwardedPort.collectAsState()
-    val isForwarding = (forwardedPort != null && tunnelStatus == TunnelStatus.CONNECTED && activeTunnelUrl.isNotBlank())
-    val isConnecting = (forwardedPort != null && tunnelStatus == TunnelStatus.CONNECTING)
+    val isForwarding = (forwardingStatus == TunnelStatus.CONNECTED && forwardingActiveUrl.isNotBlank())
+    val isConnecting = (forwardingStatus == TunnelStatus.CONNECTING)
 
     Column(
         modifier = Modifier
@@ -2570,7 +2572,7 @@ private fun ControlTab(
                             Column {
                                 Text("Worldwide HTTPS Link (Public Internet):", fontSize = 10.sp, color = TextMuted)
                                 Text(
-                                    text = activeTunnelUrl,
+                                    text = forwardingActiveUrl,
                                     fontSize = 12.sp,
                                     color = PrimaryAccent,
                                     fontWeight = FontWeight.SemiBold,
@@ -2585,7 +2587,7 @@ private fun ControlTab(
                                 OutlinedButton(
                                     onClick = {
                                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                        val clip = android.content.ClipData.newPlainText("Forwarded URL", activeTunnelUrl)
+                                        val clip = android.content.ClipData.newPlainText("Forwarded URL", forwardingActiveUrl)
                                         clipboard.setPrimaryClip(clip)
                                         Toast.makeText(context, "Copied Worldwide HTTPS link", Toast.LENGTH_SHORT).show()
                                     },
@@ -2601,7 +2603,7 @@ private fun ControlTab(
                                 Button(
                                     onClick = {
                                         try {
-                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(activeTunnelUrl))
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(forwardingActiveUrl))
                                             context.startActivity(intent)
                                         } catch (e: Exception) {
                                             Toast.makeText(context, "Cannot open browser", Toast.LENGTH_SHORT).show()
@@ -2663,7 +2665,7 @@ private fun ControlTab(
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            border = BorderStroke(1.dp, DarkBorder)
+            border = BorderStroke(1.dp, if (tokenTunnelStatus == TunnelStatus.CONNECTED) StatusGreen.copy(alpha = 0.5f) else DarkBorder)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
@@ -2677,7 +2679,7 @@ private fun ControlTab(
                         Text("Cloudflare Tunnel", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                     }
 
-                    val (tunnelLabel, tunnelColor) = when (tunnelStatus) {
+                    val (tunnelLabel, tunnelColor) = when (tokenTunnelStatus) {
                         TunnelStatus.DISCONNECTED -> Pair("Disconnected", TextMuted)
                         TunnelStatus.CONNECTING -> Pair("Connecting...", StatusOrange)
                         TunnelStatus.CONNECTED -> Pair("Connected", StatusGreen)
@@ -2705,7 +2707,11 @@ private fun ControlTab(
                     fontSize = 12.sp
                 )
 
-                if (tunnelStatus == TunnelStatus.CONNECTED && activeTunnelUrl.isNotBlank()) {
+                tokenError?.let {
+                    Text(it, color = StatusRed, fontSize = 12.sp)
+                }
+
+                if (tokenTunnelStatus == TunnelStatus.CONNECTED) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = DarkSurfaceElevated,
@@ -2714,40 +2720,43 @@ private fun ControlTab(
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Public Tunnel URL", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = activeTunnelUrl,
-                                    color = StatusGreen,
-                                    fontSize = 13.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            IconButton(onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("Tunnel URL", activeTunnelUrl))
-                                Toast.makeText(context, "URL copied to clipboard", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = StatusGreen, modifier = Modifier.size(18.dp))
-                            }
+                            Icon(Icons.Default.Check, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Tunnel active via Zero Trust token",
+                                color = StatusGreen,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
 
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.stopTunnel()
+                            viewModel.stopNamedTunnel()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.15f)),
                         border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f)),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Stop Tunnel", color = StatusRed, fontWeight = FontWeight.Bold)
+                        Text("Stop Named Tunnel", color = StatusRed, fontWeight = FontWeight.Bold)
+                    }
+                } else if (tokenTunnelStatus == TunnelStatus.CONNECTING) {
+                    Button(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.stopNamedTunnel()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.15f)),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cancel Connecting", color = StatusRed, fontWeight = FontWeight.Bold)
                     }
                 } else {
                     OutlinedTextField(

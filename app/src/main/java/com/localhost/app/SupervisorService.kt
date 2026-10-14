@@ -94,18 +94,22 @@ class SupervisorService : Service() {
         scope.launch {
             combine(
                 processSupervisor.runningCount,
-                cloudflareTunnelManager.tunnelStatus,
+                cloudflareTunnelManager.tokenTunnelStatus,
+                cloudflareTunnelManager.forwardingStatus,
                 nginxManager.proxyConfig
-            ) { count, tunnelStatus, proxyConfig ->
+            ) { count, tokenStatus, forwardStatus, proxyConfig ->
                 val activeItems = mutableListOf<String>()
                 if (count > 0) {
                     activeItems.add(if (count == 1) "1 Web Server running" else "$count Web Servers running")
                 }
-                if (tunnelStatus == TunnelStatus.CONNECTED) {
-                    activeItems.add("Cloudflare Tunnel active")
+                if (tokenStatus == TunnelStatus.CONNECTED) {
+                    activeItems.add("Cloudflare Token Tunnel active")
+                }
+                if (forwardStatus == TunnelStatus.CONNECTED) {
+                    activeItems.add("Port Forwarding active")
                 }
                 if (proxyConfig.isRunning) {
-                    activeItems.add("Port Forwarding (8443) active")
+                    activeItems.add("Nginx Proxy active")
                 }
                 activeItems
             }.collect { activeItems ->

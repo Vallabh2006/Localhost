@@ -6,6 +6,7 @@ import com.localhost.core.data.repository.SettingsRepository
 import com.localhost.core.model.RuntimePack
 import com.localhost.core.model.RuntimeType
 import com.localhost.runtime.manager.ComposerManager
+import com.localhost.runtime.manager.MariaDBManager
 import com.localhost.runtime.manager.RuntimeManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +21,8 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val runtimeManager: RuntimeManager,
-    private val composerManager: ComposerManager
+    private val composerManager: ComposerManager,
+    private val mariaDBManager: MariaDBManager
 ) : ViewModel() {
 
     val wakeLock: StateFlow<Boolean> = settingsRepository.wakeLockEnabled
@@ -60,6 +62,21 @@ class SettingsViewModel @Inject constructor(
     val composerDownloadProgress: StateFlow<Float> = composerManager.downloadProgress
 
     fun isComposerInstalled(): Boolean = composerManager.isInstalled()
+
+    val isMariaDBDownloading: StateFlow<Boolean> = mariaDBManager.isDownloading
+    val mariaDBDownloadProgress: StateFlow<Float> = mariaDBManager.downloadProgress
+    val mariaDBStatusMessage: StateFlow<String?> = mariaDBManager.statusMessage
+
+    fun isMariaDBInstalled(): Boolean = mariaDBManager.isInstalled()
+
+    fun installMariaDB() {
+        viewModelScope.launch {
+            val res = mariaDBManager.installMariaDB()
+            if (res.isFailure) {
+                _errorMessage.value = "Failed to install MariaDB: ${res.exceptionOrNull()?.message}"
+            }
+        }
+    }
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage = _errorMessage.asStateFlow()
@@ -124,6 +141,16 @@ class SettingsViewModel @Inject constructor(
     fun uninstallRuntime(runtime: RuntimeType) {
         viewModelScope.launch {
             runtimeManager.uninstallRuntime(runtime)
+        }
+    }
+
+    fun uninstallComposer() {
+        composerManager.composerFile.delete()
+    }
+
+    fun uninstallMariaDB() {
+        viewModelScope.launch {
+            mariaDBManager.uninstall()
         }
     }
 

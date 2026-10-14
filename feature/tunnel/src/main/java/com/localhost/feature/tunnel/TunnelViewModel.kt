@@ -24,9 +24,16 @@ class TunnelViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
-    val tunnelStatus: StateFlow<TunnelStatus> = tunnelManager.tunnelStatus
-    val activeUrl: StateFlow<String> = tunnelManager.activeUrl
-    val errorMessage: StateFlow<String?> = tunnelManager.errorMessage
+    val tokenTunnelStatus: StateFlow<TunnelStatus> = tunnelManager.tokenTunnelStatus
+    val tokenErrorMessage: StateFlow<String?> = tunnelManager.tokenErrorMessage
+
+    val forwardingStatus: StateFlow<TunnelStatus> = tunnelManager.forwardingStatus
+    val forwardingActiveUrl: StateFlow<String> = tunnelManager.forwardingActiveUrl
+    val forwardingErrorMessage: StateFlow<String?> = tunnelManager.forwardingErrorMessage
+
+    val tunnelStatus: StateFlow<TunnelStatus> = tunnelManager.tokenTunnelStatus
+    val activeUrl: StateFlow<String> = tunnelManager.tokenActiveUrl
+    val errorMessage: StateFlow<String?> = tunnelManager.tokenErrorMessage
 
     val nginxProxyConfig: StateFlow<NginxProxyConfig> = nginxManager.proxyConfig
 
@@ -40,8 +47,16 @@ class TunnelViewModel @Inject constructor(
         tunnelManager.startQuickTunnel(targetPort)
     }
 
+    fun stopForwarding() {
+        tunnelManager.stopPortForwarding()
+    }
+
     fun startNamedTunnel(token: String) {
         tunnelManager.startNamedTunnel(token)
+    }
+
+    fun stopNamedTunnel() {
+        tunnelManager.stopNamedTunnel()
     }
 
     fun stopTunnel() {

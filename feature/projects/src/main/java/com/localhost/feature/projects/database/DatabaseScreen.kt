@@ -120,11 +120,11 @@ fun DatabaseScreen(
 ) {
     val selectedEngine by viewModel.selectedEngine.collectAsState()
     val mysqlConfig by viewModel.mysqlConfig.collectAsState()
-    val postgresConfig by viewModel.postgresConfig.collectAsState()
     val isMysqlConnected by viewModel.isMysqlConnected.collectAsState()
-    val isPostgresConnected by viewModel.isPostgresConnected.collectAsState()
     val mysqlMessage by viewModel.mysqlMessage.collectAsState()
-    val postgresMessage by viewModel.postgresMessage.collectAsState()
+    val isMariaDBDownloading by viewModel.isMariaDBDownloading.collectAsState()
+    val mariaDBProgress by viewModel.mariaDBProgress.collectAsState()
+    val mariaDBStatusMessage by viewModel.mariaDBStatusMessage.collectAsState()
     val testResult by viewModel.testConnectionResult.collectAsState()
 
     val databases by viewModel.databases.collectAsState()
@@ -159,9 +159,9 @@ fun DatabaseScreen(
     var newPassword by remember { mutableStateOf("") }
     var changePasswordInput by remember { mutableStateOf("") }
 
-    val activeConfig = if (selectedEngine == DatabaseEngine.MYSQL) mysqlConfig else postgresConfig
-    val activeConnected = if (selectedEngine == DatabaseEngine.MYSQL) isMysqlConnected else isPostgresConnected
-    val activeMessage = if (selectedEngine == DatabaseEngine.MYSQL) mysqlMessage else postgresMessage
+    val activeConfig = mysqlConfig
+    val activeConnected = isMysqlConnected
+    val activeMessage = mysqlMessage
 
     Scaffold(
         containerColor = DarkBackground,
@@ -185,45 +185,43 @@ fun DatabaseScreen(
                 }
             }
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val isMySqlSel = selectedEngine == DatabaseEngine.MYSQL
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isMySqlSel) PrimaryAccentContainer else DarkSurface,
-                    border = BorderStroke(1.dp, if (isMySqlSel) PrimaryAccent else DarkBorder),
+            Card(
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = BorderStroke(1.dp, if (isMysqlConnected) StatusGreen.copy(alpha = 0.5f) else DarkBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .clickable { viewModel.selectService(DatabaseEngine.MYSQL) }
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(if (isMysqlConnected) StatusGreen else StatusRed, RoundedCornerShape(50))
+                        )
                         Column {
-                            Text("MySQL", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isMySqlSel) PrimaryAccent else TextPrimary)
-                            Text(if (isMysqlConnected) "Port 3306 (Running)" else "Port 3306 (Stopped)", fontSize = 10.sp, color = TextMuted)
+                            Text("MariaDB Server 13.0 (Port 3306)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
+                            Text(
+                                if (isMysqlConnected) "Native Server Active (127.0.0.1:3306)" else (mariaDBStatusMessage ?: "Server Daemon Stopped"),
+                                fontSize = 11.sp,
+                                color = if (isMysqlConnected) StatusGreen else TextMuted
+                            )
                         }
                     }
-                }
-
-                val isPgSel = selectedEngine == DatabaseEngine.POSTGRESQL
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isPgSel) PrimaryAccentContainer else DarkSurface,
-                    border = BorderStroke(1.dp, if (isPgSel) PrimaryAccent else DarkBorder),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { viewModel.selectService(DatabaseEngine.POSTGRESQL) }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Column {
-                            Text("PostgreSQL", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isPgSel) PrimaryAccent else TextPrimary)
-                            Text(if (isPostgresConnected) "Port 5432 (Running)" else "Port 5432 (Stopped)", fontSize = 10.sp, color = TextMuted)
+                    if (!viewModel.isMariaDBInstalled()) {
+                        Button(
+                            onClick = { viewModel.installMariaDB() },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            enabled = !isMariaDBDownloading
+                        ) {
+                            Text(if (isMariaDBDownloading) "Installing..." else "Install MariaDB", fontSize = 11.sp, color = TextOnAccent)
                         }
                     }
                 }
@@ -558,7 +556,7 @@ private fun DatabaseDashboardTab(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Column {
                             Text(
-                                text = if (engine == DatabaseEngine.MYSQL) "MySQL Service" else "PostgreSQL Service",
+                                text = "MariaDB Server (Port 3306)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = TextPrimary

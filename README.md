@@ -172,6 +172,18 @@ Localhost/
 
 ---
 
+## Changes in Version 1.0.3
+
+- Complete Segregation of Port Forwarding & Cloudflare Named Tunnels: Completely isolated states, controls, and inputs between quick HTTPS port forwarding and Cloudflare Zero Trust named token tunnels. Public port forwarding never touches, populates, or resets the Cloudflare token input field or its connection status.
+- Independent Concurrent Tunnels & Auto-Reconnect: Both Port Forwarding and Cloudflare Named Tunnels can run concurrently without mutual cancellation. Added automatic reconnection resilience to restore dropped sessions if temporary network changes occur.
+- Carrier Network HTTP/2 Transport: Configured standard HTTP/2 transport across all Cloudflare tunnels to prevent aggressive UDP/QUIC packet filtering and drops on mobile networks.
+- Full MariaDB Native Integration: Complete MariaDB client and manager supporting table creation, interactive data viewer, full-fidelity SQL query console, and SQL/CSV import & export.
+- Runtime Package Manager Streamlining: Cleaned up installed package cards in Settings by removing redundant status checkmarks and keeping simple one-tap uninstall buttons.
+- Process Lifecycle & Dynamic Library Fixes: Added MariaDB native shared library directory (runtimes/mariadb/lib) to LD_LIBRARY_PATH and eliminated process detachment crashes.
+- Dynamic Supervisor Service Notification: Foreground service notification dynamically tracks active Web Servers, Port Forwarding, Cloudflare Named Tunnels, and Nginx Proxy states independently.
+
+---
+
 ## Changes in Version 1.0.2
 
 - VS Code Style Worldwide Port Forwarding: Allows specifying any local port to tunnel directly to a public worldwide HTTPS URL via Cloudflare Quick Tunnel, accessible from anywhere on the internet, featuring instant link copying, browser launch, and QR code sharing.

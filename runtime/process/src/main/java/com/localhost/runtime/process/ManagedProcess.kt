@@ -162,16 +162,7 @@ class ManagedProcess(
                     }
                 }
 
-                val setsidPath = when {
-                    File("/system/bin/setsid").exists() -> "/system/bin/setsid"
-                    File("/bin/setsid").exists() -> "/bin/setsid"
-                    else -> null
-                }
-
                 val finalCommand = mutableListOf<String>()
-                if (setsidPath != null) {
-                    finalCommand.add(setsidPath)
-                }
                 if (project.runtime == RuntimeType.PYTHON && commandParts.isNotEmpty() && (commandParts[0] == "python" || commandParts[0] == "python3" || commandParts[0] == executablePath)) {
                     val projectVenv = listOf(
                         File(workDir, ".venv"),
@@ -234,6 +225,12 @@ class ManagedProcess(
                     env["PYTHONUSERBASE"] = projectVenv.absolutePath
                     env["PYTHONUNBUFFERED"] = "1"
                     env["WERKZEUG_DEBUG_PIN"] = "off"
+                    val curLd = env["LD_LIBRARY_PATH"] ?: ""
+                    val targetParent = targetDir?.parentFile
+                    val mariadbLib = targetParent?.let { File(it, "mariadb/lib") }
+                    if (mariadbLib != null && mariadbLib.exists()) {
+                        env["LD_LIBRARY_PATH"] = "${mariadbLib.absolutePath}:$curLd"
+                    }
                     if (targetDir != null) {
                         val certFile = File(targetDir, "etc/tls/cert.pem")
                         val certifiFile = File(targetDir, "lib/python3.14/site-packages/certifi/cacert.pem")
@@ -355,6 +352,10 @@ class ManagedProcess(
 
                     val elapsed = System.currentTimeMillis() - launchTimeMs
                     logRepository.append(project.id, LogStream.SYSTEM, "Process exited with code $exitCode after ${elapsed}ms")
+
+                    if (elapsed > 10_000L) {
+                        retryCount = 0
+                    }
 
                     val shouldRestart = when (project.restartPolicy) {
                         RestartPolicy.ALWAYS -> true

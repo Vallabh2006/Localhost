@@ -465,6 +465,10 @@ private fun RuntimesSection(
     val isComposerDownloading by viewModel.isComposerDownloading.collectAsState()
     val composerProgress by viewModel.composerDownloadProgress.collectAsState()
     val isComposerInstalled = viewModel.isComposerInstalled()
+    val isMariaDBDownloading by viewModel.isMariaDBDownloading.collectAsState()
+    val mariaDBProgress by viewModel.mariaDBDownloadProgress.collectAsState()
+    val mariaDBStatusMessage by viewModel.mariaDBStatusMessage.collectAsState()
+    val isMariaDBInstalled = viewModel.isMariaDBInstalled()
 
     Text("Runtime Environments & Tools", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
 
@@ -475,44 +479,88 @@ private fun RuntimesSection(
             border = BorderStroke(1.dp, DarkBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Download, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text("PHP Composer", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
-                            Text("Dependency manager for PHP runtime (composer.phar)", color = TextSecondary, fontSize = 11.sp)
-                        }
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("PHP Composer", fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("v2.7.2 - ~3MB", color = TextMuted, fontSize = 12.sp)
                     }
 
-                    if (isComposerInstalled) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = StatusGreen.copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.4f))
-                        ) {
-                            Text("Ready", color = StatusGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    when {
+                        isComposerInstalled -> {
+                            IconButton(onClick = { viewModel.uninstallComposer() }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Uninstall", tint = StatusRed, modifier = Modifier.size(20.dp))
+                            }
                         }
-                    } else if (isComposerDownloading) {
-                        LinearProgressIndicator(
-                            progress = { composerProgress },
-                            modifier = Modifier.width(80.dp),
-                            color = PrimaryAccent
-                        )
-                    } else {
-                        Button(
-                            onClick = { viewModel.downloadComposer() },
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.Download, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Install", color = TextOnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+
+                        isComposerDownloading -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${(composerProgress * 100).toInt()}%", color = PrimaryAccent, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+
+                        else -> {
+                            Button(
+                                onClick = { viewModel.downloadComposer() },
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Install", color = TextOnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("MariaDB Server", fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("v13.0.2 - ~22MB", color = TextMuted, fontSize = 12.sp)
+                    }
+
+                    when {
+                        isMariaDBInstalled -> {
+                            IconButton(onClick = { viewModel.uninstallMariaDB() }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Uninstall", tint = StatusRed, modifier = Modifier.size(20.dp))
+                            }
+                        }
+
+                        isMariaDBDownloading -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${(mariaDBProgress * 100).toInt()}%", color = PrimaryAccent, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+
+                        else -> {
+                            Button(
+                                onClick = { viewModel.installMariaDB() },
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Install", color = TextOnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -557,7 +605,7 @@ private fun AboutSection() {
                     color = PrimaryAccentContainer,
                     border = BorderStroke(1.dp, PrimaryAccent)
                 ) {
-                    Text("v1.0.2", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    Text("v1.0.3", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
             }
 
@@ -631,7 +679,7 @@ private fun AboutSection() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Latest Changes in v1.0.2", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                Text("Latest Changes in v1.0.3", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
                 Icon(
                     if (showChangelog) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
@@ -649,11 +697,11 @@ private fun AboutSection() {
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val changelogItems = listOf(
-                            "VS Code Style Port Forwarding: Forward any local port directly to an internet-accessible public worldwide HTTPS link via Cloudflare Quick Tunnel with instant copy, browser launch, and QR code.",
-                            "Database Studio Enhancements: Services default to stopped; connection testing locked when offline; full SQL builtin function engine; empty default query input; instant user update refresh; dedicated Activity Logs tab.",
-                            "Editor Navigation & Cursor Stability: Removed valid tick badge; auto-scrolls viewport to cursor when scrolling and typing; eliminated scroll-to-top jump on keyboard appearance.",
-                            "Android Navigation Bar Insets: Proper insets padding for 3-button navigation bars across all screens without UI overlap.",
-                            "50ms Responsive Theme Customiser: 0.05-second real-time color wheel and shade slider update interval."
+                            "Complete Segregation of Port Forwarding & Cloudflare Named Tunnels: Completely isolated states, controls, and inputs between quick HTTPS port forwarding and Cloudflare Zero Trust named token tunnels without crosstalk.",
+                            "Independent Concurrent Tunnels & Auto-Reconnect: Both Port Forwarding and Cloudflare Named Tunnels can run simultaneously with automatic reconnection resilience and HTTP/2 transport over mobile carrier networks.",
+                            "Full MariaDB Database Engine: Complete MariaDB client and manager supporting table creation, interactive data viewer, full-fidelity SQL query console, and SQL/CSV import & export.",
+                            "Runtime Package Manager Streamlining: Cleaned up installed package cards in Settings by removing redundant status checkmarks and keeping simple one-tap uninstall buttons.",
+                            "Process & Dynamic Library Fixes: Fixed native shared library dependencies for MariaDB (runtimes/mariadb/lib) and eliminated process detachment crashes."
                         )
                         changelogItems.forEach { item ->
                             Row(
@@ -762,15 +810,9 @@ private fun RuntimePackItem(
 
                 when {
                     pack.isInstalled || pack.downloadStatus == DownloadStatus.READY -> {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Check, contentDescription = "Installed", tint = StatusGreen, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.padding(2.dp))
-                            Text("Ready", color = StatusGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            if (pack.runtime != RuntimeType.STATIC) {
-                                Spacer(modifier = Modifier.padding(4.dp))
-                                IconButton(onClick = onUninstall, modifier = Modifier.size(28.dp)) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Uninstall", tint = StatusRed, modifier = Modifier.size(16.dp))
-                                }
+                        if (pack.runtime != RuntimeType.STATIC) {
+                            IconButton(onClick = onUninstall, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Delete, contentDescription = "Uninstall", tint = StatusRed, modifier = Modifier.size(20.dp))
                             }
                         }
                     }

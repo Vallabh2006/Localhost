@@ -72,9 +72,17 @@ class ProjectsViewModel @Inject constructor(
     val projects: StateFlow<List<Project>> = projectRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val tunnelStatus: StateFlow<TunnelStatus> = tunnelManager.tunnelStatus
-    val activeTunnelUrl: StateFlow<String> = tunnelManager.activeUrl
-    val tunnelError: StateFlow<String?> = tunnelManager.errorMessage
+    val forwardingStatus: StateFlow<TunnelStatus> = tunnelManager.forwardingStatus
+    val forwardingActiveUrl: StateFlow<String> = tunnelManager.forwardingActiveUrl
+    val forwardingError: StateFlow<String?> = tunnelManager.forwardingErrorMessage
+
+    val tokenTunnelStatus: StateFlow<TunnelStatus> = tunnelManager.tokenTunnelStatus
+    val tokenActiveUrl: StateFlow<String> = tunnelManager.tokenActiveUrl
+    val tokenError: StateFlow<String?> = tunnelManager.tokenErrorMessage
+
+    val tunnelStatus: StateFlow<TunnelStatus> = forwardingStatus
+    val activeTunnelUrl: StateFlow<String> = forwardingActiveUrl
+    val tunnelError: StateFlow<String?> = forwardingError
     val proxyConfig: StateFlow<NginxProxyConfig> = nginxManager.proxyConfig
 
     private val _forwardedPort = MutableStateFlow<Int?>(null)
@@ -88,7 +96,7 @@ class ProjectsViewModel @Inject constructor(
 
     fun stopPortForwarding() {
         _forwardedPort.value = null
-        tunnelManager.stopTunnel()
+        tunnelManager.stopPortForwarding()
         _message.value = "Port forwarding stopped"
     }
 
@@ -1187,12 +1195,18 @@ class ProjectsViewModel @Inject constructor(
     }
 
     fun stopTunnel() {
-        tunnelManager.stopTunnel()
+        tunnelManager.stopPortForwarding()
         _message.value = "Tunnel stopped"
     }
 
     fun startNamedTunnel(token: String) {
         tunnelManager.startNamedTunnel(token)
+        _message.value = "Connecting Cloudflare Named Tunnel..."
+    }
+
+    fun stopNamedTunnel() {
+        tunnelManager.stopNamedTunnel()
+        _message.value = "Cloudflare Named Tunnel stopped"
     }
 
     fun createProject(name: String, runtime: RuntimeType, port: Int, filesDir: File): Boolean {

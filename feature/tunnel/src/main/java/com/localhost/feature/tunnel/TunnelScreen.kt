@@ -6,10 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,26 +25,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -53,8 +50,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.activity.compose.BackHandler
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -93,12 +88,15 @@ fun TunnelScreen(
     onBackClick: () -> Unit = {}
 ) {
     BackHandler { onBackClick() }
-    val status by viewModel.tunnelStatus.collectAsState()
-    val activeUrl by viewModel.activeUrl.collectAsState()
-    val errorMessage by viewModel.errorMessage.collectAsState()
+    val forwardingStatus by viewModel.forwardingStatus.collectAsState()
+    val forwardingUrl by viewModel.forwardingActiveUrl.collectAsState()
+    val forwardingError by viewModel.forwardingErrorMessage.collectAsState()
+
+    val tokenStatus by viewModel.tokenTunnelStatus.collectAsState()
+    val tokenError by viewModel.tokenErrorMessage.collectAsState()
+
     val config by viewModel.tunnelConfig.collectAsState()
     val savedTokens by viewModel.savedTokens.collectAsState()
-    val nginxConfig by viewModel.nginxProxyConfig.collectAsState()
     val context = LocalContext.current
 
     var tokenText by remember(config.token) { mutableStateOf(config.token) }
@@ -106,7 +104,6 @@ fun TunnelScreen(
     var tokensDropdownExpanded by remember { mutableStateOf(false) }
 
     var targetPortText by remember { mutableStateOf("8000") }
-    var httpsPortText by remember { mutableStateOf("8443") }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -133,7 +130,7 @@ fun TunnelScreen(
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = BorderStroke(1.5.dp, if (status == TunnelStatus.CONNECTED) StatusGreen.copy(alpha = 0.6f) else PrimaryAccent.copy(alpha = 0.3f))
+                border = BorderStroke(1.5.dp, if (forwardingStatus == TunnelStatus.CONNECTED) StatusGreen.copy(alpha = 0.6f) else PrimaryAccent.copy(alpha = 0.3f))
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -153,7 +150,7 @@ fun TunnelScreen(
                             }
                         }
 
-                        val (tLabel, tColor) = when (status) {
+                        val (fLabel, fColor) = when (forwardingStatus) {
                             TunnelStatus.DISCONNECTED -> Pair("OFFLINE", TextMuted)
                             TunnelStatus.CONNECTING -> Pair("CONNECTING", StatusOrange)
                             TunnelStatus.CONNECTED -> Pair("ONLINE", StatusGreen)
@@ -162,12 +159,12 @@ fun TunnelScreen(
 
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = tColor.copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, tColor.copy(alpha = 0.4f))
+                            color = fColor.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, fColor.copy(alpha = 0.4f))
                         ) {
                             Text(
-                                text = tLabel,
-                                color = tColor,
+                                text = fLabel,
+                                color = fColor,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -176,13 +173,13 @@ fun TunnelScreen(
                     }
 
                     Text(
-                        "Forwards your local port to the public internet with a random HTTPS URL (like https://xxxx.trycloudflare.com). Anyone in the world can access it without being on the same Wi-Fi.",
+                        "Forwards your local port to the public internet with a random HTTPS URL. Anyone in the world can access it without being on the same Wi-Fi.",
                         fontSize = 11.sp,
                         color = TextSecondary,
                         lineHeight = 16.sp
                     )
 
-                    if (status == TunnelStatus.CONNECTED && activeUrl.isNotBlank()) {
+                    if (forwardingStatus == TunnelStatus.CONNECTED && forwardingUrl.isNotBlank()) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = DarkSurfaceElevated,
@@ -199,7 +196,7 @@ fun TunnelScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Random Public URL (Worldwide)", fontSize = 10.sp, color = TextMuted, fontWeight = FontWeight.Medium)
                                     Text(
-                                        text = activeUrl,
+                                        text = forwardingUrl,
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 13.sp,
                                         color = StatusGreen,
@@ -211,7 +208,7 @@ fun TunnelScreen(
                                     IconButton(
                                         onClick = {
                                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("Public Tunnel URL", activeUrl))
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("Public URL", forwardingUrl))
                                             Toast.makeText(context, "Copied public URL", Toast.LENGTH_SHORT).show()
                                         },
                                         modifier = Modifier.size(36.dp)
@@ -221,7 +218,7 @@ fun TunnelScreen(
 
                                     IconButton(
                                         onClick = {
-                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(activeUrl)).apply {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(forwardingUrl)).apply {
                                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
                                             }
                                             context.startActivity(intent)
@@ -235,7 +232,7 @@ fun TunnelScreen(
                                         onClick = {
                                             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                                 type = "text/plain"
-                                                putExtra(Intent.EXTRA_TEXT, activeUrl)
+                                                putExtra(Intent.EXTRA_TEXT, forwardingUrl)
                                             }
                                             context.startActivity(Intent.createChooser(sendIntent, "Share Public URL"))
                                         },
@@ -248,7 +245,7 @@ fun TunnelScreen(
                         }
 
                         Button(
-                            onClick = { viewModel.stopTunnel() },
+                            onClick = { viewModel.stopForwarding() },
                             colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
                             border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
                             shape = RoundedCornerShape(12.dp),
@@ -260,7 +257,7 @@ fun TunnelScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Stop Public Port Forwarding", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
-                    } else if (status == TunnelStatus.CONNECTING) {
+                    } else if (forwardingStatus == TunnelStatus.CONNECTING) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = DarkSurfaceElevated,
@@ -284,7 +281,7 @@ fun TunnelScreen(
                         }
 
                         OutlinedButton(
-                            onClick = { viewModel.stopTunnel() },
+                            onClick = { viewModel.stopForwarding() },
                             border = BorderStroke(1.dp, DarkBorder),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -294,7 +291,7 @@ fun TunnelScreen(
                             Text("Cancel", color = TextSecondary)
                         }
                     } else {
-                        errorMessage?.let { err ->
+                        forwardingError?.let { err ->
                             Text(err, color = StatusRed, fontSize = 11.sp)
                         }
 
@@ -355,7 +352,7 @@ fun TunnelScreen(
                                 Text("Public HTTPS via Named Tunnel Token", color = TextSecondary, fontSize = 11.sp)
                             }
                         }
-                        val (dotColor, statusLabel) = when (status) {
+                        val (dotColor, statusLabel) = when (tokenStatus) {
                             TunnelStatus.CONNECTED -> Pair(StatusGreen, "LIVE")
                             TunnelStatus.CONNECTING -> Pair(StatusYellow, "CONNECTING")
                             TunnelStatus.ERROR -> Pair(StatusRed, "ERROR")
@@ -368,43 +365,13 @@ fun TunnelScreen(
                         }
                     }
 
-                    if (activeUrl.isNotBlank()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DarkSurfaceElevated)
-                                .border(1.dp, PrimaryAccent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = activeUrl,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                color = PrimaryAccent,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(activeUrl))
-                                    context.startActivity(intent)
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(Icons.Default.OpenInBrowser, contentDescription = "Open", tint = PrimaryAccent)
-                            }
-                        }
-                    }
-
-                    errorMessage?.let {
+                    tokenError?.let {
                         Text(text = it, color = StatusRed, fontSize = 12.sp)
                     }
 
-                    if (status == TunnelStatus.CONNECTED || status == TunnelStatus.CONNECTING) {
+                    if (tokenStatus == TunnelStatus.CONNECTED || tokenStatus == TunnelStatus.CONNECTING) {
                         Button(
-                            onClick = { viewModel.stopTunnel() },
+                            onClick = { viewModel.stopNamedTunnel() },
                             colors = ButtonDefaults.buttonColors(containerColor = StatusRed.copy(alpha = 0.2f)),
                             border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
                             shape = RoundedCornerShape(12.dp),
