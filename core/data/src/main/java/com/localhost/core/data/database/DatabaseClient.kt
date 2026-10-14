@@ -18,6 +18,15 @@ import javax.inject.Singleton
 class DatabaseClient @Inject constructor() {
 
     private val mysqlDatabases = mutableMapOf<String, MutableMap<String, MutableList<Map<String, String>>>>(
+        "cats_db" to mutableMapOf(
+            "cats" to mutableListOf(
+                mapOf("id" to "1", "name" to "Oliver", "breed" to "British Shorthair", "age" to "3", "color" to "Orange Tabby", "created_at" to "2026-10-15 00:00:00"),
+                mapOf("id" to "2", "name" to "Luna", "breed" to "Siamese", "age" to "2", "color" to "Seal Point", "created_at" to "2026-10-15 00:01:00"),
+                mapOf("id" to "3", "name" to "Milo", "breed" to "Maine Coon", "age" to "4", "color" to "Brown Classic Tabby", "created_at" to "2026-10-15 00:02:00"),
+                mapOf("id" to "4", "name" to "Bella", "breed" to "Persian", "age" to "1", "color" to "White", "created_at" to "2026-10-15 00:03:00"),
+                mapOf("id" to "5", "name" to "Leo", "breed" to "Bengal", "age" to "5", "color" to "Spotted Rosetted", "created_at" to "2026-10-15 00:04:00")
+            )
+        ),
         "localhost_app" to mutableMapOf(
             "users" to mutableListOf(
                 mapOf("id" to "1", "username" to "admin", "email" to "admin@localhost.dev", "role" to "superadmin", "created_at" to "2026-10-14 12:00:00"),
@@ -49,6 +58,15 @@ class DatabaseClient @Inject constructor() {
     )
 
     private val postgresDatabases = mutableMapOf<String, MutableMap<String, MutableList<Map<String, String>>>>(
+        "cats_db" to mutableMapOf(
+            "cats" to mutableListOf(
+                mapOf("id" to "1", "name" to "Oliver", "breed" to "British Shorthair", "age" to "3", "color" to "Orange Tabby", "created_at" to "2026-10-15 00:00:00"),
+                mapOf("id" to "2", "name" to "Luna", "breed" to "Siamese", "age" to "2", "color" to "Seal Point", "created_at" to "2026-10-15 00:01:00"),
+                mapOf("id" to "3", "name" to "Milo", "breed" to "Maine Coon", "age" to "4", "color" to "Brown Classic Tabby", "created_at" to "2026-10-15 00:02:00"),
+                mapOf("id" to "4", "name" to "Bella", "breed" to "Persian", "age" to "1", "color" to "White", "created_at" to "2026-10-15 00:03:00"),
+                mapOf("id" to "5", "name" to "Leo", "breed" to "Bengal", "age" to "5", "color" to "Spotted Rosetted", "created_at" to "2026-10-15 00:04:00")
+            )
+        ),
         "localhost_app" to mutableMapOf(
             "users" to mutableListOf(
                 mapOf("id" to "1", "username" to "root", "email" to "root@localhost.dev", "role" to "superadmin", "created_at" to "2026-10-14 12:00:00"),
@@ -71,7 +89,36 @@ class DatabaseClient @Inject constructor() {
         )
     )
 
-    private val definedTableColumns = mutableMapOf<String, List<String>>()
+    private val definedTableColumns = mutableMapOf<String, List<String>>(
+        "cats_db.cats" to listOf("id", "name", "breed", "age", "color", "created_at")
+    )
+
+    private fun syncCatsJsonIfPresent() {
+        try {
+            val possiblePaths = listOf(
+                java.io.File("/data/user/0/com.localhost.app/files/projects/cat_database_test/cats.json"),
+                java.io.File("/data/data/com.localhost.app/files/projects/cat_database_test/cats.json")
+            )
+            val file = possiblePaths.firstOrNull { it.exists() && it.isFile } ?: return
+            val content = file.readText()
+            val jsonArray = org.json.JSONArray(content)
+            val rows = mutableListOf<Map<String, String>>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                val map = mutableMapOf<String, String>()
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    map[k] = obj.optString(k, "")
+                }
+                rows.add(map)
+            }
+            if (rows.isNotEmpty()) {
+                mysqlDatabases.getOrPut("cats_db") { mutableMapOf() }["cats"] = rows
+                postgresDatabases.getOrPut("cats_db") { mutableMapOf() }["cats"] = rows
+            }
+        } catch (_: Exception) {}
+    }
 
     private val userPasswords = mutableMapOf<Pair<DatabaseEngine, String>, String>(
         Pair(DatabaseEngine.MYSQL, "root") to "",
@@ -127,6 +174,7 @@ class DatabaseClient @Inject constructor() {
     }
 
     suspend fun listDatabases(engine: DatabaseEngine): List<String> = withContext(Dispatchers.IO) {
+        syncCatsJsonIfPresent()
         if (engine == DatabaseEngine.MYSQL) {
             mysqlDatabases.keys.toList()
         } else {
@@ -135,12 +183,14 @@ class DatabaseClient @Inject constructor() {
     }
 
     suspend fun listTables(engine: DatabaseEngine, database: String): List<String> = withContext(Dispatchers.IO) {
+        syncCatsJsonIfPresent()
         val dbs = if (engine == DatabaseEngine.MYSQL) mysqlDatabases else postgresDatabases
         val dbMatch = dbs.entries.firstOrNull { it.key.equals(database, ignoreCase = true) }
         dbMatch?.value?.keys?.toList() ?: emptyList()
     }
 
     suspend fun getTableSchema(engine: DatabaseEngine, database: String, table: String): List<ColumnInfo> = withContext(Dispatchers.IO) {
+        syncCatsJsonIfPresent()
         val dbs = if (engine == DatabaseEngine.MYSQL) mysqlDatabases else postgresDatabases
         val dbMatch = dbs.entries.firstOrNull { it.key.equals(database, ignoreCase = true) }?.value ?: return@withContext emptyList()
         val tableEntry = dbMatch.entries.firstOrNull { it.key.equals(table, ignoreCase = true) }
@@ -174,6 +224,7 @@ class DatabaseClient @Inject constructor() {
     }
 
     suspend fun getTableData(engine: DatabaseEngine, database: String, table: String): TableData = withContext(Dispatchers.IO) {
+        syncCatsJsonIfPresent()
         val dbs = if (engine == DatabaseEngine.MYSQL) mysqlDatabases else postgresDatabases
         val dbMatch = dbs.entries.firstOrNull { it.key.equals(database, ignoreCase = true) }?.value ?: return@withContext TableData(table, emptyList(), emptyList())
         val tableEntry = dbMatch.entries.firstOrNull { it.key.equals(table, ignoreCase = true) }

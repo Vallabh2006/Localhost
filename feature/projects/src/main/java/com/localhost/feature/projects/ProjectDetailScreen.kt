@@ -1705,6 +1705,7 @@ private fun ConfigurationsTab(
     var showFreezeDialog by remember { mutableStateOf(false) }
     var freezeFileName by remember { mutableStateOf("requirements.txt") }
     var freezeFilePath by remember { mutableStateOf("./") }
+    var requirementsFileName by remember(project.id) { mutableStateOf("requirements.txt") }
 
     var mainFileName by remember(project.id) {
         val defaultMain = when (project.runtime) {
@@ -1869,36 +1870,81 @@ private fun ConfigurationsTab(
                     border = BorderStroke(1.dp, DarkBorder)
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Virtual Environment & Requirements", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
-                        Text("Strictly isolated into .venv. Use Regenerate to recreate, or Freeze to export dependencies.", fontSize = 11.sp, color = TextSecondary)
+                        Text("Virtual Environment & Dependencies", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                        Text("Install requirements from txt file into .venv or export current environment.", fontSize = 11.sp, color = TextSecondary)
 
-                        Button(
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.regenerateVenv(project)
-                            },
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
-                            border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.RestartAlt, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Regenerate Environment", color = PrimaryAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            OutlinedTextField(
+                                value = requirementsFileName,
+                                onValueChange = { requirementsFileName = it },
+                                placeholder = { Text("requirements.txt", color = TextMuted, fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated,
+                                    focusedBorderColor = PrimaryAccent,
+                                    unfocusedBorderColor = DarkBorderSubtle
+                                )
+                            )
+                            Button(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val target = if (requirementsFileName.isBlank()) "requirements.txt" else requirementsFileName.trim()
+                                    viewModel.installPipRequirements(project, target)
+                                },
+                                enabled = !isInstalling,
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                            ) {
+                                if (isInstalling) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = TextOnAccent, strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Installing...", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                } else {
+                                    Icon(Icons.Default.Download, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Install", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
                         }
 
-                        Button(
-                            onClick = {
-                                showFreezeDialog = true
-                            },
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
-                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f))
-                        ) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Freeze Requirements", color = StatusGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.regenerateVenv(project)
+                                },
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f))
+                            ) {
+                                Icon(Icons.Default.RestartAlt, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Regenerate .venv", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    showFreezeDialog = true
+                                },
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                                border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f))
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Freeze Req", color = StatusGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
