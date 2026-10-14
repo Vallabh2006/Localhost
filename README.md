@@ -180,7 +180,12 @@ Localhost/
 - Default Root User and Empty Password: Default user configured to root with empty password credentials for both MySQL and PostgreSQL engines.
 - Database User Management: Added user administration actions including Change Password and Delete User directly from the Users and Permissions management tab.
 - Interactive Database Schema Visualizer: Added Visualize tab rendering interactive schema diagrams with database root nodes, table entity cards displaying column names, data types, and primary keys, and foreign key relationships connected with distinct orange connector lines in a non-overlapping staggered layout.
-- SQL Dump Export: Export database schemas and optional table data rows into standard .sql files with actions to share directly via Android Share Sheet or save locally to the device Downloads directory.
+- Export Database: Renamed Export SQL tab to Export Database, generating full database exports (.sql) with table schemas and optional record data, along with direct database SQL import.
+- Database Studio Compact Header: Collapsible credentials bar saving vertical screen real estate for Explorer, Visualize, and Query Console tabs, with quick Test and Connect/Disconnect controls.
+- Port Forwarding Active Links: Live HTTPS reverse proxy and direct LAN HTTP URL display with Copy, Open in Browser, and Stop Forwarding actions directly inside the project Control tab.
+- Database Query Console and Resilience: Added quick query chips, detailed query execution error cards, and case-insensitive table querying with pre-populated PostgreSQL tables.
+- Default Root User Privileges: Enforced ALL PRIVILEGES by default for the root user across both MySQL and PostgreSQL engines.
+- PHP Runtime Execution: Non-blocking CLI runner preventing Android seccomp sandbox crashes on imported PHP projects.
 - SQL Dump Import: Added SQL import action allowing selection and execution of .sql dump files directly into existing databases.
 - Automatic Python Virtual Environment Scaffolding: Automatically scaffolds an isolated .venv environment with pyvenv.cfg, activation scripts, and site-packages on project creation, ZIP archive extraction, GitHub repository clone, and external share imports.
 - Project Archive Export Filtering: Automatically excludes .venv directories from exported project ZIP archives and detects .env files, displaying a user prompt to exclude sensitive environment variables (recommended) or include them.

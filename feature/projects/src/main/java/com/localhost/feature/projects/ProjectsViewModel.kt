@@ -17,6 +17,8 @@ import com.localhost.runtime.manager.RuntimeManager
 import com.localhost.runtime.process.ProcessSupervisor
 import com.localhost.runtime.templates.TemplateProvider
 import com.localhost.tunnel.CloudflareTunnelManager
+import com.localhost.tunnel.NginxManager
+import com.localhost.core.model.NginxProxyConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import java.io.FileOutputStream
@@ -63,7 +65,8 @@ class ProjectsViewModel @Inject constructor(
     private val requestRecordDao: RequestRecordDao,
     private val settingsRepository: SettingsRepository,
     private val logRepository: LogRepository,
-    private val composerManager: com.localhost.runtime.manager.ComposerManager
+    private val composerManager: com.localhost.runtime.manager.ComposerManager,
+    private val nginxManager: NginxManager
 ) : ViewModel() {
 
     val projects: StateFlow<List<Project>> = projectRepository.observeAll()
@@ -72,6 +75,23 @@ class ProjectsViewModel @Inject constructor(
     val tunnelStatus: StateFlow<TunnelStatus> = tunnelManager.tunnelStatus
     val activeTunnelUrl: StateFlow<String> = tunnelManager.activeUrl
     val tunnelError: StateFlow<String?> = tunnelManager.errorMessage
+    val proxyConfig: StateFlow<NginxProxyConfig> = nginxManager.proxyConfig
+
+    fun startPortForwarding(targetPort: Int, forwardPort: Int) {
+        viewModelScope.launch {
+            val res = nginxManager.startProxy(targetPort = targetPort, httpsPort = forwardPort)
+            if (res.isSuccess) {
+                _message.value = "Port $targetPort forwarded to port $forwardPort"
+            } else {
+                _message.value = res.exceptionOrNull()?.message ?: "Failed to forward port"
+            }
+        }
+    }
+
+    fun stopPortForwarding() {
+        nginxManager.stopProxy()
+        _message.value = "Port forwarding stopped"
+    }
 
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()

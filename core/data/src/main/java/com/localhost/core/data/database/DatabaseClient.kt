@@ -49,8 +49,12 @@ class DatabaseClient @Inject constructor() {
 
     private val postgresDatabases = mutableMapOf<String, MutableMap<String, MutableList<Map<String, String>>>>(
         "localhost_app" to mutableMapOf(
+            "users" to mutableListOf(
+                mapOf("id" to "1", "username" to "root", "email" to "root@localhost.dev", "role" to "superadmin", "created_at" to "2026-10-14 12:00:00"),
+                mapOf("id" to "2", "username" to "developer", "email" to "dev@localhost.dev", "role" to "developer", "created_at" to "2026-10-14 12:15:00")
+            ),
             "accounts" to mutableListOf(
-                mapOf("user_id" to "1001", "username" to "postgres_admin", "email" to "pgadmin@localhost.dev", "is_active" to "true"),
+                mapOf("user_id" to "1001", "username" to "root", "email" to "root@localhost.dev", "is_active" to "true"),
                 mapOf("user_id" to "1002", "username" to "service_worker", "email" to "worker@localhost.dev", "is_active" to "true")
             ),
             "metrics" to mutableListOf(
@@ -76,7 +80,7 @@ class DatabaseClient @Inject constructor() {
     )
 
     private val postgresUsers = mutableListOf(
-        DatabaseUser("root", "%", listOf("SUPERUSER", "ALL PRIVILEGES"))
+        DatabaseUser("root", "%", listOf("ALL PRIVILEGES"))
     )
 
     suspend fun testConnection(config: DatabaseConfig): Result<String> = withContext(Dispatchers.IO) {
@@ -170,65 +174,81 @@ class DatabaseClient @Inject constructor() {
         val upper = cleanSql.uppercase()
         val dbs = if (engine == DatabaseEngine.MYSQL) mysqlDatabases else postgresDatabases
 
+        val targetDb = dbs.entries.firstOrNull { it.key.equals(database, ignoreCase = true) }?.value
+            ?: dbs["localhost_app"]
+            ?: dbs.values.firstOrNull()
+            ?: mutableMapOf()
+
         try {
             when {
-                upper.startsWith("SHOW DATABASES") || upper.startsWith("SELECT DATNAME FROM PG_DATABASE") -> {
+                upper.startsWith("SHOW DATABASES") || upper.contains("PG_DATABASE") -> {
                     val list = dbs.keys.toList()
                     QueryResult(true, System.currentTimeMillis() - start, list.size, listOf("Database"), list.map { listOf(it) })
                 }
-                upper.startsWith("SHOW TABLES") || upper.startsWith("SELECT TABLENAME FROM PG_TABLES") -> {
-                    val tables = dbs[database]?.keys?.toList() ?: emptyList()
+                upper.startsWith("SHOW TABLES") || upper.contains("PG_TABLES") -> {
+                    val tables = targetDb.keys.toList()
                     QueryResult(true, System.currentTimeMillis() - start, tables.size, listOf("Tables_in_$database"), tables.map { listOf(it) })
                 }
                 upper.startsWith("SELECT") -> {
                     val fromIdx = upper.indexOf("FROM ")
                     if (fromIdx != -1) {
-                        val tablePart = cleanSql.substring(fromIdx + 5).trim().split(" ")[0].trim('`', '"')
-                        val rows = dbs[database]?.get(tablePart)
-                        if (rows != null) {
-                            val cols = rows.firstOrNull()?.keys?.toList() ?: emptyList()
+                        val afterFrom = cleanSql.substring(fromIdx + 5).trim()
+                        val rawTableToken = afterFrom.split(Regex("""\s+"""))[0]
+                        val cleanTable = rawTableToken.substringAfterLast(".").filter { it !in "`'\"; \t\r\n" }
+                        val tableEntry = targetDb.entries.firstOrNull { it.key.equals(cleanTable, ignoreCase = true) }
+                        if (tableEntry != null) {
+                            val rows = tableEntry.value
+                            val cols = rows.firstOrNull()?.keys?.toList() ?: listOf("id", "value")
                             val rowData = rows.map { r -> cols.map { c -> r[c] ?: "NULL" } }
                             QueryResult(true, System.currentTimeMillis() - start, rowData.size, cols, rowData)
                         } else {
-                            QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Table '$tablePart' does not exist in database '$database'")
+                            val availableTables = targetDb.keys.joinToString(", ")
+                            QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Table '$cleanTable' does not exist in database '$database'. Available: [$availableTables]")
                         }
+                    } else if (upper.contains("VERSION()")) {
+                        val ver = if (engine == DatabaseEngine.MYSQL) "8.4.1-Localhost" else "PostgreSQL 16.2 (Localhost Engine)"
+                        QueryResult(true, System.currentTimeMillis() - start, 1, listOf("version"), listOf(listOf(ver)))
                     } else {
-                        QueryResult(true, System.currentTimeMillis() - start, 1, listOf("1"), listOf(listOf("1")))
+                        QueryResult(true, System.currentTimeMillis() - start, 1, listOf("result"), listOf(listOf("1")))
                     }
                 }
                 upper.startsWith("CREATE DATABASE") -> {
-                    val dbName = cleanSql.split(" ").last().trim('`', '"')
+                    val dbName = cleanSql.split(Regex("""\s+""")).last().trim('`', '"', ';')
                     dbs[dbName] = mutableMapOf()
                     QueryResult(true, System.currentTimeMillis() - start, 1)
                 }
                 upper.startsWith("CREATE TABLE") -> {
-                    val tableName = cleanSql.substringAfter("CREATE TABLE").trim().split(" ")[0].split("(")[0].trim('`', '"')
-                    dbs[database]?.set(tableName, mutableListOf(
+                    val tableName = cleanSql.substringAfter("TABLE").trim().split(Regex("""\s+"""))[0].split("(")[0].substringAfterLast(".").trim('`', '"', ';')
+                    targetDb[tableName] = mutableListOf(
                         mapOf("id" to "1", "created_at" to java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
-                    ))
+                    )
                     QueryResult(true, System.currentTimeMillis() - start, 1)
                 }
                 upper.startsWith("INSERT INTO") -> {
-                    val tableName = cleanSql.substringAfter("INSERT INTO").trim().split(" ")[0].split("(")[0].trim('`', '"')
-                    val table = dbs[database]?.get(tableName)
-                    if (table != null) {
+                    val tableName = cleanSql.substringAfter("INTO").trim().split(Regex("""\s+"""))[0].split("(")[0].substringAfterLast(".").trim('`', '"', ';')
+                    val tableEntry = targetDb.entries.firstOrNull { it.key.equals(tableName, ignoreCase = true) }
+                    if (tableEntry != null) {
+                        val table = tableEntry.value
                         val newId = (table.size + 1).toString()
                         val newRow = mutableMapOf("id" to newId, "created_at" to java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
                         table.add(newRow)
                         QueryResult(true, System.currentTimeMillis() - start, 1)
                     } else {
-                        QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Table '$tableName' not found")
+                        QueryResult(false, System.currentTimeMillis() - start, 0, errorMessage = "Table '$tableName' not found in database '$database'")
                     }
                 }
                 upper.startsWith("DROP TABLE") -> {
-                    val tableName = cleanSql.split(" ").last().trim('`', '"')
-                    dbs[database]?.remove(tableName)
+                    val tableName = cleanSql.split(Regex("""\s+""")).last().substringAfterLast(".").trim('`', '"', ';')
+                    val matchKey = targetDb.keys.firstOrNull { it.equals(tableName, ignoreCase = true) }
+                    if (matchKey != null) {
+                        targetDb.remove(matchKey)
+                    }
                     QueryResult(true, System.currentTimeMillis() - start, 1)
                 }
                 upper.startsWith("CREATE USER") -> {
                     val userList = if (engine == DatabaseEngine.MYSQL) mysqlUsers else postgresUsers
-                    val username = cleanSql.substringAfter("CREATE USER").trim().split(" ")[0].trim('\'', '"', '`').substringBefore("@")
-                    userList.add(DatabaseUser(username, "%", listOf("USAGE")))
+                    val username = cleanSql.substringAfter("CREATE USER").trim().split(Regex("""\s+"""))[0].filter { it !in "`'\"; \t\r\n" }.substringBefore("@")
+                    userList.add(DatabaseUser(username, "%", listOf("ALL PRIVILEGES")))
                     QueryResult(true, System.currentTimeMillis() - start, 1)
                 }
                 upper.startsWith("GRANT") -> {

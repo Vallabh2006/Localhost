@@ -33,6 +33,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PlayArrow
@@ -132,7 +134,8 @@ fun DatabaseScreen(
         uri?.let { viewModel.importSqlFile(context, it) }
     }
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Explorer", "Visualize", "Query Console", "Users & Perms", "Export SQL")
+    var isConfigExpanded by remember { mutableStateOf(false) }
+    val tabs = listOf("Explorer", "Visualize", "Query Console", "Users & Perms", "Export Database")
 
     var sqlQueryInput by remember { mutableStateOf("SELECT * FROM users LIMIT 20;") }
     var showCreateUserDialog by remember { mutableStateOf(false) }
@@ -256,136 +259,204 @@ fun DatabaseScreen(
             }
 
             Card(
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = BorderStroke(1.dp, DarkBorder)
+                border = BorderStroke(1.dp, if (activeConnected) PrimaryAccent.copy(alpha = 0.3f) else DarkBorder),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = activeConfig.host,
-                            onValueChange = { viewModel.updateConfig(it, activeConfig.port, activeConfig.user, activeConfig.password, activeConfig.database) },
-                            label = { Text("Host", fontSize = 11.sp, color = TextMuted) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1.5f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = PrimaryAccent,
-                                unfocusedBorderColor = DarkBorderSubtle,
-                                focusedContainerColor = DarkSurfaceElevated,
-                                unfocusedContainerColor = DarkSurfaceElevated
-                            )
-                        )
-                        OutlinedTextField(
-                            value = activeConfig.port.toString(),
-                            onValueChange = { p -> p.toIntOrNull()?.let { viewModel.updateConfig(activeConfig.host, it, activeConfig.user, activeConfig.password, activeConfig.database) } },
-                            label = { Text("Port", fontSize = 11.sp, color = TextMuted) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = PrimaryAccent,
-                                unfocusedBorderColor = DarkBorderSubtle,
-                                focusedContainerColor = DarkSurfaceElevated,
-                                unfocusedContainerColor = DarkSurfaceElevated
-                            )
-                        )
-                    }
-
-                    var dbPasswordVisible by remember { mutableStateOf(false) }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = activeConfig.user,
-                            onValueChange = { viewModel.updateConfig(activeConfig.host, activeConfig.port, it, activeConfig.password, activeConfig.database) },
-                            label = { Text("User", fontSize = 11.sp, color = TextMuted) },
-                            placeholder = { Text("root", color = TextMuted, fontSize = 12.sp) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = PrimaryAccent,
-                                unfocusedBorderColor = DarkBorderSubtle,
-                                focusedContainerColor = DarkSurfaceElevated,
-                                unfocusedContainerColor = DarkSurfaceElevated
-                            )
-                        )
-                        OutlinedTextField(
-                            value = activeConfig.password,
-                            onValueChange = { viewModel.updateConfig(activeConfig.host, activeConfig.port, activeConfig.user, it, activeConfig.database) },
-                            label = { Text("Password", fontSize = 11.sp, color = TextMuted) },
-                            placeholder = { Text("None (null)", color = TextMuted, fontSize = 12.sp) },
-                            singleLine = true,
-                            visualTransformation = if (dbPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = { dbPasswordVisible = !dbPasswordVisible },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (dbPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = if (dbPasswordVisible) "Hide password" else "Show password",
-                                        tint = TextMuted,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = PrimaryAccent,
-                                unfocusedBorderColor = DarkBorderSubtle,
-                                focusedContainerColor = DarkSurfaceElevated,
-                                unfocusedContainerColor = DarkSurfaceElevated
-                            )
-                        )
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedButton(
-                            onClick = { viewModel.testConnection() },
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, DarkBorder),
-                            modifier = Modifier.weight(1f).height(44.dp)
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.clickable { isConfigExpanded = !isConfigExpanded }
                         ) {
-                            Text("Test Connection", fontSize = 12.sp, color = TextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (activeConnected) StatusGreen else StatusRed)
+                            )
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = "${activeConfig.host}:${activeConfig.port}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = DarkSurfaceElevated,
+                                        border = BorderStroke(1.dp, DarkBorderSubtle)
+                                    ) {
+                                        Text(
+                                            text = activeConfig.user.ifBlank { "root" },
+                                            fontSize = 10.sp,
+                                            color = PrimaryAccent,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = if (isConfigExpanded) "Tap to hide configuration" else "Tap to edit credentials",
+                                    fontSize = 10.sp,
+                                    color = TextMuted
+                                )
+                            }
                         }
 
-                        Button(
-                            onClick = {
-                                if (activeConnected) viewModel.disconnect() else viewModel.connect()
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (activeConnected) DarkSurfaceElevated else PrimaryAccent
-                            ),
-                            border = if (activeConnected) BorderStroke(1.dp, StatusRed) else null,
-                            modifier = Modifier.weight(1f).height(44.dp)
-                        ) {
-                            Text(
-                                if (activeConnected) "Disconnect" else "Connect",
-                                color = if (activeConnected) StatusRed else TextOnAccent,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                maxLines = 1
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = { viewModel.testConnection() },
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, DarkBorder),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("Test", fontSize = 11.sp, color = TextPrimary)
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (activeConnected) viewModel.disconnect() else viewModel.connect()
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (activeConnected) DarkSurfaceElevated else PrimaryAccent
+                                ),
+                                border = if (activeConnected) BorderStroke(1.dp, StatusRed) else null,
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text(
+                                    if (activeConnected) "Disconnect" else "Connect",
+                                    color = if (activeConnected) StatusRed else TextOnAccent,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { isConfigExpanded = !isConfigExpanded },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isConfigExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = "Toggle Config",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (isConfigExpanded) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(color = DarkBorderSubtle)
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = activeConfig.host,
+                                onValueChange = { viewModel.updateConfig(it, activeConfig.port, activeConfig.user, activeConfig.password, activeConfig.database) },
+                                label = { Text("Host", fontSize = 11.sp, color = TextMuted) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1.5f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryAccent,
+                                    unfocusedBorderColor = DarkBorderSubtle,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated
+                                )
+                            )
+                            OutlinedTextField(
+                                value = activeConfig.port.toString(),
+                                onValueChange = { p -> p.toIntOrNull()?.let { viewModel.updateConfig(activeConfig.host, it, activeConfig.user, activeConfig.password, activeConfig.database) } },
+                                label = { Text("Port", fontSize = 11.sp, color = TextMuted) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryAccent,
+                                    unfocusedBorderColor = DarkBorderSubtle,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated
+                                )
+                            )
+                        }
+
+                        var dbPasswordVisible by remember { mutableStateOf(false) }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = activeConfig.user,
+                                onValueChange = { viewModel.updateConfig(activeConfig.host, activeConfig.port, it, activeConfig.password, activeConfig.database) },
+                                label = { Text("User", fontSize = 11.sp, color = TextMuted) },
+                                placeholder = { Text("root", color = TextMuted, fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryAccent,
+                                    unfocusedBorderColor = DarkBorderSubtle,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated
+                                )
+                            )
+                            OutlinedTextField(
+                                value = activeConfig.password,
+                                onValueChange = { viewModel.updateConfig(activeConfig.host, activeConfig.port, activeConfig.user, it, activeConfig.database) },
+                                label = { Text("Password", fontSize = 11.sp, color = TextMuted) },
+                                placeholder = { Text("None (null)", color = TextMuted, fontSize = 12.sp) },
+                                singleLine = true,
+                                visualTransformation = if (dbPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = { dbPasswordVisible = !dbPasswordVisible },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (dbPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (dbPasswordVisible) "Hide password" else "Show password",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryAccent,
+                                    unfocusedBorderColor = DarkBorderSubtle,
+                                    focusedContainerColor = DarkSurfaceElevated,
+                                    unfocusedContainerColor = DarkSurfaceElevated
+                                )
                             )
                         }
                     }
 
                     activeMessage?.let { msg ->
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = msg,
                             fontSize = 10.sp,
                             color = if (activeConnected) StatusGreen else StatusRed,
                             fontFamily = FontFamily.Monospace,
-                            lineHeight = 13.sp
+                            lineHeight = 13.sp,
+                            maxLines = if (isConfigExpanded) 4 else 1
                         )
                     }
                 }
@@ -416,7 +487,8 @@ fun DatabaseScreen(
                 }
             }
 
-            when (selectedTab) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when (selectedTab) {
                 0 -> {
                     ExplorerTab(
                         databases = databases,
@@ -458,7 +530,7 @@ fun DatabaseScreen(
                     )
                 }
                 4 -> {
-                    ExportSqlTab(
+                    ExportDatabaseTab(
                         databases = databases,
                         selectedDb = selectedDb,
                         onSelectDb = { viewModel.selectDatabase(it) },
@@ -469,6 +541,7 @@ fun DatabaseScreen(
                         onImport = { importSqlLauncher.launch("*/*") }
                     )
                 }
+            }
             }
         }
     }
@@ -989,10 +1062,40 @@ private fun QueryConsoleTab(
     isExecuting: Boolean
 ) {
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val quickQueries = listOf(
+                "SELECT * FROM users LIMIT 20;",
+                "SELECT * FROM accounts;",
+                "SELECT * FROM metrics;",
+                "SELECT version();",
+                "SHOW TABLES;"
+            )
+            quickQueries.forEach { q ->
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = DarkSurfaceElevated,
+                    border = BorderStroke(1.dp, DarkBorderSubtle),
+                    modifier = Modifier.clickable { onQueryChange(q) }
+                ) {
+                    Text(
+                        text = q,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth().height(110.dp),
+            modifier = Modifier.fillMaxWidth().height(90.dp),
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TextPrimary),
             shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -1050,7 +1153,23 @@ private fun QueryConsoleTab(
                     }
                 }
             } else if (!res.isSuccess) {
-                Text(res.errorMessage ?: "Query failed", color = StatusRed, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                Card(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = StatusRed.copy(alpha = 0.1f)),
+                    border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Query Execution Error", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = StatusRed)
+                        Text(
+                            text = res.errorMessage ?: "Query failed",
+                            color = TextPrimary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
             }
         }
     }
@@ -1128,7 +1247,7 @@ private fun UsersTab(
 }
 
 @Composable
-private fun ExportSqlTab(
+private fun ExportDatabaseTab(
     databases: List<String>,
     selectedDb: String,
     onSelectDb: (String) -> Unit,
@@ -1147,7 +1266,7 @@ private fun ExportSqlTab(
             border = BorderStroke(1.dp, DarkBorder)
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Export SQL Dump", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text("Export Database", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                 Text(
                     "Generate a standard SQL dump file (.sql) containing table schemas and record data for backup or external database restoration.",
                     fontSize = 11.sp,
@@ -1222,7 +1341,7 @@ private fun ExportSqlTab(
                 HorizontalDivider(color = DarkBorderSubtle)
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Import SQL File", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Import Database SQL File", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                     Text("Import and execute an existing SQL dump (.sql) into '$selectedDb'.", fontSize = 11.sp, color = TextSecondary)
                     OutlinedButton(
                         onClick = onImport,

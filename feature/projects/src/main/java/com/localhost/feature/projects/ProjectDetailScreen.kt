@@ -2371,7 +2371,9 @@ private fun ControlTab(
     var namedTokenInput by remember { mutableStateOf("") }
 
     var showForwardPortDialog by remember { mutableStateOf(false) }
-    var forwardPortInput by remember(project.port) { mutableStateOf(project.port.toString()) }
+    var forwardPortInput by remember(project.port) { mutableStateOf("8443") }
+    val proxyConfig by viewModel.proxyConfig.collectAsState()
+    val isForwardingThisProject = proxyConfig.isRunning && proxyConfig.targetPort == project.port
 
     Column(
         modifier = Modifier
@@ -2459,24 +2461,140 @@ private fun ControlTab(
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            border = BorderStroke(1.dp, DarkBorder)
+            border = BorderStroke(1.dp, if (isForwardingThisProject) StatusGreen.copy(alpha = 0.5f) else DarkBorder)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Port Forwarding", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-                }
-                Text("Forward local Android ports to custom host interfaces or proxy listeners.", color = TextSecondary, fontSize = 12.sp)
-
-                Button(
-                    onClick = { showForwardPortDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
-                    border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.4f)),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Configure Port Forwarding", color = PrimaryAccent, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Port Forwarding", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                    }
+
+                    if (isForwardingThisProject) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = StatusGreen.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, StatusGreen)
+                        ) {
+                            Text(
+                                text = "Active",
+                                color = StatusGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (isForwardingThisProject) {
+                    val localIp = com.localhost.core.common.NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
+                    val lanHttpsUrl = if (proxyConfig.lanHttpsUrl.isNotBlank()) proxyConfig.lanHttpsUrl else "https://$localIp:${proxyConfig.httpsPort}"
+                    val directHttpUrl = "http://$localIp:${project.port}"
+
+                    Text(
+                        "Port ${project.port} is actively forwarded with HTTPS reverse proxy on port ${proxyConfig.httpsPort}.",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = DarkSurfaceElevated,
+                        border = BorderStroke(1.dp, DarkBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column {
+                                Text("LAN HTTPS Link (Secure Proxy):", fontSize = 10.sp, color = TextMuted)
+                                Text(
+                                    text = lanHttpsUrl,
+                                    fontSize = 12.sp,
+                                    color = PrimaryAccent,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Column {
+                                Text("Direct LAN HTTP Link:", fontSize = 10.sp, color = TextMuted)
+                                Text(
+                                    text = directHttpUrl,
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        val clip = android.content.ClipData.newPlainText("Forwarded URL", lanHttpsUrl)
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Copied HTTPS link", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, DarkBorder),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Copy", fontSize = 12.sp, color = TextPrimary)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lanHttpsUrl))
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Cannot open browser", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Open", fontSize = 12.sp, color = TextOnAccent)
+                                }
+                            }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { viewModel.stopPortForwarding() },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Stop Port Forwarding", color = StatusRed, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Text("Forward local Android ports to custom host interfaces or proxy listeners.", color = TextSecondary, fontSize = 12.sp)
+
+                    Button(
+                        onClick = {
+                            forwardPortInput = "8443"
+                            showForwardPortDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                        border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Configure Port Forwarding", color = PrimaryAccent, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -2737,10 +2855,12 @@ private fun ControlTab(
             title = { Text("Port Forwarding", fontWeight = FontWeight.Bold, color = TextPrimary) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Specify the local port you want to forward:", color = TextSecondary, fontSize = 13.sp)
+                    Text("Forward project port ${project.port} to external HTTPS port:", color = TextSecondary, fontSize = 13.sp)
                     OutlinedTextField(
                         value = forwardPortInput,
                         onValueChange = { forwardPortInput = it },
+                        label = { Text("External HTTPS Port", fontSize = 11.sp, color = TextMuted) },
+                        placeholder = { Text("8443", color = TextMuted, fontSize = 12.sp) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
@@ -2752,9 +2872,9 @@ private fun ControlTab(
             confirmButton = {
                 Button(
                     onClick = {
-                        val p = forwardPortInput.toIntOrNull() ?: project.port
+                        val p = forwardPortInput.toIntOrNull() ?: 8443
                         showForwardPortDialog = false
-                        Toast.makeText(context, "Port $p forwarded", Toast.LENGTH_SHORT).show()
+                        viewModel.startPortForwarding(project.port, p)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
                 ) {
