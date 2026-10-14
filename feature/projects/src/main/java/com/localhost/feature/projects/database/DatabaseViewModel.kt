@@ -35,31 +35,26 @@ class DatabaseViewModel @Inject constructor(
     private val databaseClient: DatabaseClient
 ) : ViewModel() {
 
-    private val _selectedEngine = MutableStateFlow(DatabaseEngine.MYSQL)
+    companion object {
+        private val _selectedEngine = MutableStateFlow(DatabaseEngine.MYSQL)
+        private val _mysqlConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.MYSQL, port = 3306, user = "root", password = ""))
+        private val _postgresConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.POSTGRESQL, port = 5432, user = "root", password = ""))
+        private val _isMysqlConnected = MutableStateFlow(false)
+        private val _isPostgresConnected = MutableStateFlow(false)
+        private val _mysqlMessage = MutableStateFlow<String?>("MySQL Service stopped")
+        private val _postgresMessage = MutableStateFlow<String?>("PostgreSQL Service stopped")
+        private val _databaseLogs = MutableStateFlow<List<String>>(listOf("[SYSTEM] Database Studio initialized. Services currently stopped."))
+    }
+
     val selectedEngine: StateFlow<DatabaseEngine> = _selectedEngine.asStateFlow()
-
-    private val _mysqlConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.MYSQL, port = 3306, user = "root", password = ""))
     val mysqlConfig: StateFlow<DatabaseConfig> = _mysqlConfig.asStateFlow()
-
-    private val _postgresConfig = MutableStateFlow(DatabaseConfig(engine = DatabaseEngine.POSTGRESQL, port = 5432, user = "root", password = ""))
     val postgresConfig: StateFlow<DatabaseConfig> = _postgresConfig.asStateFlow()
-
-    private val _isMysqlConnected = MutableStateFlow(false)
     val isMysqlConnected: StateFlow<Boolean> = _isMysqlConnected.asStateFlow()
-
-    private val _isPostgresConnected = MutableStateFlow(false)
     val isPostgresConnected: StateFlow<Boolean> = _isPostgresConnected.asStateFlow()
-
-    private val _mysqlMessage = MutableStateFlow<String?>("MySQL Service stopped")
     val mysqlMessage: StateFlow<String?> = _mysqlMessage.asStateFlow()
-
-    private val _postgresMessage = MutableStateFlow<String?>("PostgreSQL Service stopped")
     val postgresMessage: StateFlow<String?> = _postgresMessage.asStateFlow()
-
     private val _testConnectionResult = MutableStateFlow<String?>(null)
     val testConnectionResult: StateFlow<String?> = _testConnectionResult.asStateFlow()
-
-    private val _databaseLogs = MutableStateFlow<List<String>>(listOf("[SYSTEM] Database Studio initialized. Services currently stopped."))
     val databaseLogs: StateFlow<List<String>> = _databaseLogs.asStateFlow()
 
     private val _databases = MutableStateFlow<List<String>>(emptyList())
@@ -282,6 +277,20 @@ class DatabaseViewModel @Inject constructor(
 
     fun executeQuery(sql: String) {
         if (sql.isBlank()) return
+        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
+        if (!isRunning) {
+            val engName = _selectedEngine.value.displayName
+            _queryResult.value = QueryResult(
+                columns = emptyList(),
+                rows = emptyList(),
+                affectedRows = 0,
+                executionTimeMs = 0,
+                isSuccess = false,
+                errorMessage = "Failed to execute query: ${engName} service is stopped. Start the service first from Dashboard to run queries."
+            )
+            addLog("[ERROR] Query blocked: ${engName} service is offline")
+            return
+        }
         viewModelScope.launch {
             _isExecuting.value = true
             addLog("[SQL] $sql")
@@ -307,6 +316,12 @@ class DatabaseViewModel @Inject constructor(
 
     fun createUser(username: String, host: String = "%", pass: String) {
         if (username.isBlank()) return
+        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
+        if (!isRunning) {
+            val engName = _selectedEngine.value.displayName
+            addLog("[ERROR] Cannot create user: ${engName} service is offline")
+            return
+        }
         viewModelScope.launch {
             databaseClient.createUser(_selectedEngine.value, username, host, pass)
             _users.value = databaseClient.listUsers(_selectedEngine.value)
@@ -315,6 +330,12 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun changePassword(username: String, newPass: String) {
+        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
+        if (!isRunning) {
+            val engName = _selectedEngine.value.displayName
+            addLog("[ERROR] Cannot change password: ${engName} service is offline")
+            return
+        }
         viewModelScope.launch {
             databaseClient.changeUserPassword(_selectedEngine.value, username, newPass)
             _users.value = databaseClient.listUsers(_selectedEngine.value)
@@ -323,6 +344,12 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun deleteUser(username: String) {
+        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
+        if (!isRunning) {
+            val engName = _selectedEngine.value.displayName
+            addLog("[ERROR] Cannot delete user: ${engName} service is offline")
+            return
+        }
         viewModelScope.launch {
             databaseClient.deleteUser(_selectedEngine.value, username)
             _users.value = databaseClient.listUsers(_selectedEngine.value)
@@ -397,6 +424,13 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun importSqlFile(context: Context, uri: Uri) {
+        val isRunning = if (_selectedEngine.value == DatabaseEngine.MYSQL) _isMysqlConnected.value else _isPostgresConnected.value
+        if (!isRunning) {
+            val engName = _selectedEngine.value.displayName
+            Toast.makeText(context, "${engName} service is stopped. Start service first.", Toast.LENGTH_SHORT).show()
+            addLog("[ERROR] Cannot import SQL: ${engName} service is offline")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _isExecuting.value = true

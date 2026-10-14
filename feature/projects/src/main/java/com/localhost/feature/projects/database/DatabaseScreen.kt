@@ -51,6 +51,7 @@ import android.content.Context
 import androidx.compose.foundation.layout.PaddingValues
 
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -298,7 +299,9 @@ fun DatabaseScreen(
                             onQueryChange = { sqlQueryInput = it },
                             onExecute = { viewModel.executeQuery(sqlQueryInput) },
                             queryResult = queryResult,
-                            isExecuting = isExecuting
+                            isExecuting = isExecuting,
+                            isConnected = activeConnected,
+                            engine = selectedEngine
                         )
                     }
                     4 -> {
@@ -1260,9 +1263,33 @@ private fun QueryConsoleTab(
     onQueryChange: (String) -> Unit,
     onExecute: () -> Unit,
     queryResult: com.localhost.core.model.QueryResult?,
-    isExecuting: Boolean
+    isExecuting: Boolean,
+    isConnected: Boolean,
+    engine: DatabaseEngine
 ) {
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!isConnected) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = StatusOrange.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, StatusOrange.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = StatusOrange, modifier = Modifier.size(16.dp))
+                    Text(
+                        text = "${engine.displayName} service is stopped. Start the service from Dashboard to run queries.",
+                        color = StatusOrange,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1313,13 +1340,22 @@ private fun QueryConsoleTab(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Button(
                 onClick = onExecute,
-                enabled = !isExecuting,
+                enabled = isConnected && !isExecuting,
                 shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent, disabledContainerColor = DarkSurfaceElevated)
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = if (isConnected) TextOnAccent else TextMuted, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(if (isExecuting) "Running..." else "Run Query", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(
+                    text = when {
+                        isExecuting -> "Running..."
+                        !isConnected -> "Service Stopped"
+                        else -> "Run Query"
+                    },
+                    color = if (isConnected) TextOnAccent else TextMuted,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
             }
         }
 
