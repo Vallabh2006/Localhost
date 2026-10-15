@@ -161,6 +161,20 @@ fun DatabaseScreen(
 
     val activeConfig = mysqlConfig
     val activeConnected = isMysqlConnected
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1) {
+            viewModel.loadDatabases()
+            if (selectedDb.isNotBlank()) {
+                viewModel.loadTables(selectedDb)
+            }
+        } else if (selectedTab == 2) {
+            viewModel.loadDatabases()
+            if (selectedDb.isNotBlank()) {
+                viewModel.loadAllSchemas(selectedDb)
+            }
+        }
+    }
     val activeMessage = mysqlMessage
 
     Scaffold(
@@ -181,7 +195,7 @@ fun DatabaseScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.Storage, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(20.dp))
-                    Text("Database Studio", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Database", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             }
 
@@ -199,11 +213,6 @@ fun DatabaseScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(if (isMysqlConnected) StatusGreen else StatusRed, RoundedCornerShape(50))
-                        )
                         Column {
                             Text("MariaDB Server 13.0 (Port 3306)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
                             Text(
@@ -279,7 +288,12 @@ fun DatabaseScreen(
                             tableData = tableData,
                             onSelectDb = { viewModel.selectDatabase(it) },
                             onSelectTable = { db, tbl -> viewModel.selectTable(db, tbl) },
-                            onRefresh = { viewModel.loadDatabases() }
+                            onRefresh = {
+                                viewModel.loadDatabases()
+                                if (selectedDb.isNotBlank()) {
+                                    viewModel.loadTables(selectedDb)
+                                }
+                            }
                         )
                     }
                     2 -> {
@@ -288,7 +302,12 @@ fun DatabaseScreen(
                             selectedDb = selectedDb,
                             allSchemas = allTableSchemas,
                             onSelectDb = { viewModel.selectDatabase(it) },
-                            onRefresh = { viewModel.loadAllSchemas(selectedDb) }
+                            onRefresh = {
+                                viewModel.loadDatabases()
+                                if (selectedDb.isNotBlank()) {
+                                    viewModel.loadAllSchemas(selectedDb)
+                                }
+                            }
                         )
                     }
                     3 -> {
@@ -818,7 +837,10 @@ private fun ExplorerTab(
                     shape = RoundedCornerShape(8.dp),
                     color = DarkSurfaceElevated,
                     border = BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.fillMaxWidth().clickable { dbExpanded = true }
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        onRefresh()
+                        dbExpanded = true
+                    }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
@@ -837,21 +859,31 @@ private fun ExplorerTab(
                     onDismissRequest = { dbExpanded = false },
                     modifier = Modifier.background(DarkSurfaceElevated).heightIn(max = 280.dp)
                 ) {
-                    databases.forEach { db ->
+                    if (databases.isEmpty()) {
                         DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = db,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (db == selectedDb) PrimaryAccent else TextPrimary
-                                )
-                            },
+                            text = { Text("No databases found (tap to refresh)", fontSize = 12.sp, color = TextMuted) },
                             onClick = {
-                                onSelectDb(db)
+                                onRefresh()
                                 dbExpanded = false
                             }
                         )
+                    } else {
+                        databases.forEach { db ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = db,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (db == selectedDb) PrimaryAccent else TextPrimary
+                                    )
+                                },
+                                onClick = {
+                                    onSelectDb(db)
+                                    dbExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -883,7 +915,7 @@ private fun ExplorerTab(
                 ) {
                     if (tables.isEmpty()) {
                         DropdownMenuItem(
-                            text = { Text("No tables found", fontSize = 12.sp, color = TextMuted) },
+                            text = { Text("No tables found in '${selectedDb.ifBlank { "database" }}'", fontSize = 12.sp, color = TextMuted) },
                             onClick = { tableExpanded = false }
                         )
                     } else {
@@ -1056,14 +1088,17 @@ private fun VisualizeTab(
                     shape = RoundedCornerShape(8.dp),
                     color = DarkSurfaceElevated,
                     border = BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.clickable { dbExpanded = true }
+                    modifier = Modifier.clickable {
+                        onRefresh()
+                        dbExpanded = true
+                    }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("Database: $selectedDb", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
+                        Text("Database: ${selectedDb.ifBlank { "Select Database" }}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
                         Icon(Icons.Default.ExpandMore, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
                     }
                 }
@@ -1072,21 +1107,31 @@ private fun VisualizeTab(
                     onDismissRequest = { dbExpanded = false },
                     modifier = Modifier.background(DarkSurfaceElevated).heightIn(max = 280.dp)
                 ) {
-                    databases.forEach { db ->
+                    if (databases.isEmpty()) {
                         DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = db,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (db == selectedDb) PrimaryAccent else TextPrimary
-                                )
-                            },
+                            text = { Text("No databases found (tap to refresh)", fontSize = 12.sp, color = TextMuted) },
                             onClick = {
-                                onSelectDb(db)
+                                onRefresh()
                                 dbExpanded = false
                             }
                         )
+                    } else {
+                        databases.forEach { db ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = db,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (db == selectedDb) PrimaryAccent else TextPrimary
+                                    )
+                                },
+                                onClick = {
+                                    onSelectDb(db)
+                                    dbExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -1538,21 +1583,28 @@ private fun ExportDatabaseTab(
                         onDismissRequest = { dbExpanded = false },
                         modifier = Modifier.background(DarkSurfaceElevated).heightIn(max = 280.dp)
                     ) {
-                        databases.forEach { db ->
+                        if (databases.isEmpty()) {
                             DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = db,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (db == selectedDb) PrimaryAccent else TextPrimary
-                                    )
-                                },
-                                onClick = {
-                                    onSelectDb(db)
-                                    dbExpanded = false
-                                }
+                                text = { Text("No databases found", fontSize = 12.sp, color = TextMuted) },
+                                onClick = { dbExpanded = false }
                             )
+                        } else {
+                            databases.forEach { db ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = db,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (db == selectedDb) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (db == selectedDb) PrimaryAccent else TextPrimary
+                                        )
+                                    },
+                                    onClick = {
+                                        onSelectDb(db)
+                                        dbExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }

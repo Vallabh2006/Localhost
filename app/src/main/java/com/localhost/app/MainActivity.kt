@@ -16,6 +16,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
@@ -129,7 +132,7 @@ import javax.inject.Inject
 sealed class Screen(val route: String, val title: String, val icon: ImageVector? = null) {
     data object Monitor : Screen("monitor", "Monitor", Icons.Default.BarChart)
     data object Projects : Screen("projects", "Projects", Icons.Default.Folder)
-    data object Databases : Screen("databases", "Databases", Icons.Default.Storage)
+    data object Databases : Screen("databases", "Database", Icons.Default.Storage)
     data object Terminal : Screen("terminal", "Terminal", Icons.Default.Terminal)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
     data object ProjectDetail : Screen("project_detail/{projectId}", "Detail")
@@ -521,6 +524,13 @@ fun IncomingShareDialog(
     val projects by projectRepository.observeAll().collectAsState(initial = emptyList())
     var selectedMode by remember { mutableStateOf<String?>(null) }
 
+    val rawSuggestedName = remember(payload.fileName) {
+        val s = payload.fileName.removeSuffix(".zip").removeSuffix(".tar.gz").removeSuffix(".tgz").replace(Regex("[^a-zA-Z0-9_-]"), "_").trim('_')
+        if (s.isNotBlank()) s else "shared_project"
+    }
+    var newProjectName by remember(rawSuggestedName) { mutableStateOf(rawSuggestedName) }
+    var isCreatingNew by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceElevated,
@@ -566,8 +576,7 @@ fun IncomingShareDialog(
 
                     Button(
                         onClick = {
-                            onDismiss()
-                            navController.navigate(Screen.Projects.route)
+                            selectedMode = "NEW"
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                         shape = RoundedCornerShape(10.dp),
@@ -576,6 +585,135 @@ fun IncomingShareDialog(
                         Icon(Icons.Default.Add, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Create New Project", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                    }
+                } else if (selectedMode == "NEW") {
+                    Text("Create New Project from Shared File:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    OutlinedTextField(
+                        value = newProjectName,
+                        onValueChange = { newProjectName = it.replace(" ", "_") },
+                        label = { Text("Project Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
+                        )
+                    )
+
+                    Button(
+                        onClick = {
+                            val trimmed = newProjectName.trim().replace(Regex("[^a-zA-Z0-9_-]"), "_").trim('_')
+                            if (trimmed.isEmpty()) {
+                                Toast.makeText(context, "Please enter a valid project name", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            isCreatingNew = true
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    val projectsDir = java.io.File(context.filesDir, "projects").apply { mkdirs() }
+                                    var finalName = trimmed
+                                    var targetDir = java.io.File(projectsDir, finalName)
+                                    var count = 1
+                                    while (targetDir.exists()) {
+                                        finalName = "${trimmed}_$count"
+                                        targetDir = java.io.File(projectsDir, finalName)
+                                        count++
+                                    }
+                                    targetDir.mkdirs()
+
+                                    if (payload.uri != null) {
+                                        if (payload.fileName.endsWith(".zip", ignoreCase = true)) {
+                                            context.contentResolver.openInputStream(payload.uri)?.use { inStream ->
+                                                com.localhost.core.common.FileUtils.unzip(inStream, targetDir)
+                                            }
+                                        } else {
+                                            val destFile = java.io.File(targetDir, payload.fileName)
+                                            context.contentResolver.openInputStream(payload.uri)?.use { inStream ->
+                                                destFile.outputStream().use { outStream -> inStream.copyTo(outStream) }
+                                            }
+                                        }
+                                    } else if (payload.text != null) {
+                                        java.io.File(targetDir, "shared_snippet.txt").writeText(payload.text)
+                                    }
+
+                                    val runtime = when {
+                                        java.io.File(targetDir, "app.py").exists() || java.io.File(targetDir, "main.py").exists() || java.io.File(targetDir, "requirements.txt").exists() -> com.localhost.core.model.RuntimeType.PYTHON
+                                        java.io.File(targetDir, "package.json").exists() || java.io.File(targetDir, "server.js").exists() -> com.localhost.core.model.RuntimeType.NODEJS
+                                        java.io.File(targetDir, "index.php").exists() || java.io.File(targetDir, "composer.json").exists() -> com.localhost.core.model.RuntimeType.PHP
+                                        java.io.File(targetDir, "pom.xml").exists() || java.io.File(targetDir, "build.gradle").exists() -> com.localhost.core.model.RuntimeType.JAVA
+                                        else -> com.localhost.core.model.RuntimeType.STATIC
+                                    }
+
+                                    if (runtime == com.localhost.core.model.RuntimeType.PYTHON) {
+                                        val venvDir = java.io.File(targetDir, ".venv")
+                                        if (!venvDir.exists()) {
+                                            venvDir.mkdirs()
+                                            java.io.File(venvDir, "bin").mkdirs()
+                                            java.io.File(venvDir, "lib/python3.11/site-packages").mkdirs()
+                                            java.io.File(venvDir, "pyvenv.cfg").writeText("home = /system/bin\ninclude-system-site-packages = true\nversion = 3.11.9\n")
+                                        }
+                                    }
+
+                                    val startupCmd = when (runtime) {
+                                        com.localhost.core.model.RuntimeType.PYTHON -> "python3 app.py"
+                                        com.localhost.core.model.RuntimeType.NODEJS -> "node server.js"
+                                        com.localhost.core.model.RuntimeType.PHP -> "builtin"
+                                        com.localhost.core.model.RuntimeType.STATIC -> "builtin"
+                                        com.localhost.core.model.RuntimeType.JAVA -> "java -jar app.jar"
+                                    }
+
+                                    val newProj = com.localhost.core.model.Project(
+                                        id = java.util.UUID.randomUUID().toString(),
+                                        name = finalName,
+                                        runtime = runtime,
+                                        port = runtime.defaultPort,
+                                        workingDir = targetDir.absolutePath,
+                                        startupCommand = startupCmd
+                                    )
+                                    projectRepository.save(newProj)
+
+                                    withContext(Dispatchers.Main) {
+                                        isCreatingNew = false
+                                        Toast.makeText(context, "Created project '$finalName'", Toast.LENGTH_SHORT).show()
+                                        onDismiss()
+                                        navController.navigate("project_detail/${newProj.id}")
+                                    }
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        isCreatingNew = false
+                                        Toast.makeText(context, "Creation failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = !isCreatingNew && newProjectName.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        if (isCreatingNew) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = TextOnAccent, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Extracting & Creating...", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        } else {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Create & Import Project", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { selectedMode = null },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, DarkBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Back", color = TextSecondary)
                     }
                 } else {
                     Text("Select Target Project:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -641,6 +779,15 @@ fun IncomingShareDialog(
                                 }
                             }
                         }
+                    }
+
+                    OutlinedButton(
+                        onClick = { selectedMode = null },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, DarkBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Back", color = TextSecondary)
                     }
                 }
             }

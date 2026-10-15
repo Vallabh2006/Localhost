@@ -239,6 +239,7 @@ class DatabaseViewModel @Inject constructor(
 
     fun selectDatabase(name: String) {
         _selectedDatabase.value = name
+        _selectedTable.value = null
         addLog("[DATABASE] Switched to database '$name'")
         loadTables(name)
         loadAllSchemas(name)
@@ -284,13 +285,11 @@ class DatabaseViewModel @Inject constructor(
             val list = databaseClient.listTables(_selectedEngine.value, database)
             _tables.value = list
             if (list.isNotEmpty()) {
-                if (_selectedTable.value !in list) {
-                    _selectedTable.value = list.first()
-                }
-                _selectedTable.value?.let { tbl ->
-                    loadTableSchema(database, tbl)
-                    loadTableData(database, tbl)
-                }
+                val current = _selectedTable.value
+                val nextTable = if (current != null && current in list) current else list.first()
+                _selectedTable.value = nextTable
+                loadTableSchema(database, nextTable)
+                loadTableData(database, nextTable)
             } else {
                 _selectedTable.value = null
                 _tableSchema.value = emptyList()
