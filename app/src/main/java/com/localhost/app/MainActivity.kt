@@ -16,6 +16,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -531,6 +536,20 @@ fun IncomingShareDialog(
     var newProjectName by remember(rawSuggestedName) { mutableStateOf(rawSuggestedName) }
     var isCreatingNew by remember { mutableStateOf(false) }
 
+    val initialStack = remember(payload.fileName) {
+        val lower = payload.fileName.lowercase()
+        when {
+            lower.endsWith(".py") || lower.contains("python") || lower.contains("flask") || lower.contains("django") || lower.contains("fastapi") -> com.localhost.core.model.RuntimeType.PYTHON
+            lower.endsWith(".php") || lower.contains("php") || lower.contains("laravel") || lower.contains("wordpress") -> com.localhost.core.model.RuntimeType.PHP
+            lower.endsWith(".js") || lower.endsWith(".ts") || lower.contains("node") || lower.contains("express") || lower.contains("react") || lower.contains("vue") -> com.localhost.core.model.RuntimeType.NODEJS
+            lower.endsWith(".jar") || lower.endsWith(".war") || lower.contains("spring") -> com.localhost.core.model.RuntimeType.JAVA
+            else -> com.localhost.core.model.RuntimeType.PYTHON
+        }
+    }
+    var selectedRuntime by remember(initialStack) { mutableStateOf(initialStack) }
+    var portText by remember(selectedRuntime) { mutableStateOf(selectedRuntime.defaultPort.toString()) }
+    var runtimeDropdownExpanded by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceElevated,
@@ -587,12 +606,82 @@ fun IncomingShareDialog(
                         Text("Create New Project", color = TextOnAccent, fontWeight = FontWeight.Bold)
                     }
                 } else if (selectedMode == "NEW") {
-                    Text("Create New Project from Shared File:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Project Details", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+
                     OutlinedTextField(
                         value = newProjectName,
                         onValueChange = { newProjectName = it.replace(" ", "_") },
                         label = { Text("Project Name") },
                         singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
+                        )
+                    )
+
+                    Text("Runtime Stack", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = DarkSurface,
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { runtimeDropdownExpanded = true }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(selectedRuntime.displayName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
+                                    Text("Default entry: ${selectedRuntime.defaultEntryFile}", fontSize = 11.sp, color = TextMuted)
+                                }
+                                Icon(Icons.Default.ExpandMore, contentDescription = null, tint = TextMuted)
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = runtimeDropdownExpanded,
+                            onDismissRequest = { runtimeDropdownExpanded = false },
+                            modifier = Modifier.background(DarkSurfaceElevated).fillMaxWidth(0.75f)
+                        ) {
+                            com.localhost.core.model.RuntimeType.entries.forEach { r ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                r.displayName,
+                                                fontWeight = if (r == selectedRuntime) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (r == selectedRuntime) PrimaryAccent else TextPrimary
+                                            )
+                                            Text("Port ${r.defaultPort} • ${r.defaultEntryFile}", fontSize = 11.sp, color = TextMuted)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedRuntime = r
+                                        portText = r.defaultPort.toString()
+                                        runtimeDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Text("Port", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                    OutlinedTextField(
+                        value = portText,
+                        onValueChange = { portText = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Port Number") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -612,6 +701,9 @@ fun IncomingShareDialog(
                                 Toast.makeText(context, "Please enter a valid project name", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
+                            val targetPort = portText.toIntOrNull() ?: selectedRuntime.defaultPort
+                            val chosenRuntime = selectedRuntime
+
                             isCreatingNew = true
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
@@ -641,15 +733,7 @@ fun IncomingShareDialog(
                                         java.io.File(targetDir, "shared_snippet.txt").writeText(payload.text)
                                     }
 
-                                    val runtime = when {
-                                        java.io.File(targetDir, "app.py").exists() || java.io.File(targetDir, "main.py").exists() || java.io.File(targetDir, "requirements.txt").exists() -> com.localhost.core.model.RuntimeType.PYTHON
-                                        java.io.File(targetDir, "package.json").exists() || java.io.File(targetDir, "server.js").exists() -> com.localhost.core.model.RuntimeType.NODEJS
-                                        java.io.File(targetDir, "index.php").exists() || java.io.File(targetDir, "composer.json").exists() -> com.localhost.core.model.RuntimeType.PHP
-                                        java.io.File(targetDir, "pom.xml").exists() || java.io.File(targetDir, "build.gradle").exists() -> com.localhost.core.model.RuntimeType.JAVA
-                                        else -> com.localhost.core.model.RuntimeType.STATIC
-                                    }
-
-                                    if (runtime == com.localhost.core.model.RuntimeType.PYTHON) {
+                                    if (chosenRuntime == com.localhost.core.model.RuntimeType.PYTHON) {
                                         val venvDir = java.io.File(targetDir, ".venv")
                                         if (!venvDir.exists()) {
                                             venvDir.mkdirs()
@@ -659,9 +743,15 @@ fun IncomingShareDialog(
                                         }
                                     }
 
-                                    val startupCmd = when (runtime) {
-                                        com.localhost.core.model.RuntimeType.PYTHON -> "python3 app.py"
-                                        com.localhost.core.model.RuntimeType.NODEJS -> "node server.js"
+                                    val startupCmd = when (chosenRuntime) {
+                                        com.localhost.core.model.RuntimeType.PYTHON -> {
+                                            val entry = if (java.io.File(targetDir, "main.py").exists()) "main.py" else "app.py"
+                                            "python3 $entry"
+                                        }
+                                        com.localhost.core.model.RuntimeType.NODEJS -> {
+                                            val entry = if (java.io.File(targetDir, "index.js").exists()) "index.js" else "server.js"
+                                            "node $entry"
+                                        }
                                         com.localhost.core.model.RuntimeType.PHP -> "builtin"
                                         com.localhost.core.model.RuntimeType.STATIC -> "builtin"
                                         com.localhost.core.model.RuntimeType.JAVA -> "java -jar app.jar"
@@ -670,8 +760,8 @@ fun IncomingShareDialog(
                                     val newProj = com.localhost.core.model.Project(
                                         id = java.util.UUID.randomUUID().toString(),
                                         name = finalName,
-                                        runtime = runtime,
-                                        port = runtime.defaultPort,
+                                        runtime = chosenRuntime,
+                                        port = targetPort,
                                         workingDir = targetDir.absolutePath,
                                         startupCommand = startupCmd
                                     )
@@ -693,7 +783,7 @@ fun IncomingShareDialog(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
                         shape = RoundedCornerShape(10.dp),
-                        enabled = !isCreatingNew && newProjectName.isNotBlank(),
+                        enabled = !isCreatingNew && newProjectName.isNotBlank() && portText.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
                         if (isCreatingNew) {
