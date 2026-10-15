@@ -172,6 +172,15 @@ Localhost/
 
 ---
 
+## Changes in Version 1.0.4
+
+- Shared File Project Creation with Stack & Port Configuration: Seamless project creation when sharing ZIP archives or snippets from external applications (WhatsApp, file managers, browsers). Users can customize Project Name, select the desired Runtime Stack (Python, Node.js, PHP, Static, Java), and specify a custom Port number, with automatic `.venv` configuration for Python projects.
+- Database Studio Branding & Streamlining: Renamed the navigation item and screen header to "Database", eliminated redundant status indicator dot before the MariaDB Server banner, and cleaned up interface headers.
+- Explorer & Visualize Dropdown Synchronization: Fixed non-responsive and empty table/database dropdowns with auto-refresh on tab switch, dynamic database selection, scoped `SHOW TABLES FROM \`db\`` and `DESCRIBE \`db\`.\`tbl\`` queries, and resilient socket binding.
+- Auto-Refreshing Database Schemas: Switching databases instantly clears previous table selections and re-queries schemas and table contents without requiring manual navigation reloads.
+
+---
+
 ## Changes in Version 1.0.3
 
 - Complete Segregation of Port Forwarding & Cloudflare Named Tunnels: Completely isolated states, controls, and inputs between quick HTTPS port forwarding and Cloudflare Zero Trust named token tunnels. Public port forwarding never touches, populates, or resets the Cloudflare token input field or its connection status.

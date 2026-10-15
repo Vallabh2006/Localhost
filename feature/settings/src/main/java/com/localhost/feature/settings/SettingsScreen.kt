@@ -605,7 +605,7 @@ private fun AboutSection() {
                     color = PrimaryAccentContainer,
                     border = BorderStroke(1.dp, PrimaryAccent)
                 ) {
-                    Text("v1.0.3", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    Text("v1.0.4", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
             }
 
