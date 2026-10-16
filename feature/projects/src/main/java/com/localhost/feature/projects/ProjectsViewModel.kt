@@ -1450,16 +1450,48 @@ class ProjectsViewModel @Inject constructor(
         }
     }
 
+    val savedTunnelTokens: StateFlow<List<com.localhost.core.model.SavedTunnelToken>> = settingsRepository.getSavedTunnelTokens()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun saveTunnelToken(name: String, token: String) {
+        if (token.isBlank()) return
+        val finalName = if (name.isBlank()) "Tunnel-${token.take(6)}" else name.trim()
+        val entry = com.localhost.core.model.SavedTunnelToken(
+            id = UUID.randomUUID().toString(),
+            name = finalName,
+            token = token.trim()
+        )
+        viewModelScope.launch {
+            settingsRepository.saveTunnelToken(entry)
+        }
+    }
+
+    fun deleteTunnelToken(tokenId: String) {
+        viewModelScope.launch {
+            settingsRepository.deleteTunnelToken(tokenId)
+        }
+    }
+
     fun syncProjectsFromFilesystem(filesDir: File) {
         viewModelScope.launch(Dispatchers.IO) {
             val projectsDir = File(filesDir, "projects")
             if (!projectsDir.exists() || !projectsDir.isDirectory) return@launch
             val folders = projectsDir.listFiles { f -> f.isDirectory } ?: return@launch
             val existing: List<com.localhost.core.model.Project> = projectRepository.getAll()
-            val existingPaths = existing.map { File(it.workingDir).canonicalPath }.toSet()
+
+            existing.forEach { proj ->
+                val workDir = File(proj.workingDir)
+                if (!workDir.exists()) {
+                    projectRepository.delete(proj.id)
+                }
+            }
+
+            val updatedExisting = projectRepository.getAll()
+            val existingPaths = updatedExisting.map { File(it.workingDir).canonicalPath }.toSet()
 
             folders.forEach { folder ->
-                if (!existingPaths.contains(folder.canonicalPath)) {
+                val files = folder.listFiles()
+                if (!existingPaths.contains(folder.canonicalPath) && !files.isNullOrEmpty()) {
                     val name = folder.name
                     val runtime = when {
                         File(folder, "app.py").exists() || File(folder, "main.py").exists() || File(folder, "requirements.txt").exists() -> com.localhost.core.model.RuntimeType.PYTHON

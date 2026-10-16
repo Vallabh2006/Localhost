@@ -345,10 +345,11 @@ Modify: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS z", Locale.US).format(Date(f
         return ""
     }
 
-    private fun handleRmdir(args: List<String>): String {
+    private suspend fun handleRmdir(args: List<String>): String {
         val targets = args.filter { !it.startsWith("-") }
         if (targets.isEmpty()) return "rmdir: missing operand"
         val errors = mutableListOf<String>()
+        val existingProjects = try { projectRepository.getAll() } catch (_: Exception) { emptyList() }
         targets.forEach { targetPath ->
             val dir = resolveFile(targetPath)
             if (!dir.exists()) {
@@ -356,9 +357,18 @@ Modify: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS z", Locale.US).format(Date(f
             } else if (!dir.isDirectory) {
                 errors.add("rmdir: failed to remove '$targetPath': Not a directory")
             } else {
+                val canonical = try { dir.canonicalPath } catch (_: Exception) { dir.absolutePath }
                 val deleted = dir.deleteRecursively()
                 if (!deleted) {
                     errors.add("rmdir: failed to remove '$targetPath': Failed to remove directory")
+                } else {
+                    existingProjects.forEach { proj ->
+                        val pPath = try { File(proj.workingDir).canonicalPath } catch (_: Exception) { File(proj.workingDir).absolutePath }
+                        if (pPath == canonical || pPath.startsWith("$canonical/")) {
+                            processSupervisor.stopProject(proj.id)
+                            projectRepository.delete(proj.id)
+                        }
+                    }
                 }
             }
         }
@@ -408,12 +418,24 @@ Modify: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS z", Locale.US).format(Date(f
         return ""
     }
 
-    private fun handleRm(args: List<String>): String {
+    private suspend fun handleRm(args: List<String>): String {
         val files = args.filter { !it.startsWith("-") }
         if (files.isEmpty()) return "rm: missing operand"
+        val existingProjects = try { projectRepository.getAll() } catch (_: Exception) { emptyList() }
         files.forEach { filePath ->
             val f = resolveFile(filePath)
-            if (f.isDirectory) FileUtils.deleteRecursively(f) else f.delete()
+            val canonical = try { f.canonicalPath } catch (_: Exception) { f.absolutePath }
+            val wasDir = f.isDirectory
+            val deleted = if (wasDir) FileUtils.deleteRecursively(f) else f.delete()
+            if (deleted && wasDir) {
+                existingProjects.forEach { proj ->
+                    val pPath = try { File(proj.workingDir).canonicalPath } catch (_: Exception) { File(proj.workingDir).absolutePath }
+                    if (pPath == canonical || pPath.startsWith("$canonical/")) {
+                        processSupervisor.stopProject(proj.id)
+                        projectRepository.delete(proj.id)
+                    }
+                }
+            }
         }
         return ""
     }

@@ -163,6 +163,28 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+        val savedTunnelTokens: StateFlow<List<com.localhost.core.model.SavedTunnelToken>> = settingsRepository.getSavedTunnelTokens()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun saveTunnelToken(name: String, token: String) {
+        if (token.isBlank()) return
+        val finalName = if (name.isBlank()) "Tunnel-${token.take(6)}" else name.trim()
+        val entry = com.localhost.core.model.SavedTunnelToken(
+            id = java.util.UUID.randomUUID().toString(),
+            name = finalName,
+            token = token.trim()
+        )
+        viewModelScope.launch {
+            settingsRepository.saveTunnelToken(entry)
+        }
+    }
+
+    fun deleteTunnelToken(tokenId: String) {
+        viewModelScope.launch {
+            settingsRepository.deleteTunnelToken(tokenId)
+        }
+    }
+
     fun clearError() {
         _errorMessage.value = null
     }

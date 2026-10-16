@@ -69,6 +69,8 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -2409,6 +2411,7 @@ private fun ControlTab(
     val forwardingError by viewModel.forwardingError.collectAsState()
     val tokenTunnelStatus by viewModel.tokenTunnelStatus.collectAsState()
     val tokenError by viewModel.tokenError.collectAsState()
+    val savedTunnelTokens by viewModel.savedTunnelTokens.collectAsState()
     val vpnDisabled by viewModel.isVpnDisabled(project.id).collectAsState(initial = false)
     val vpnBlockedMsgFlow by viewModel.getVpnBlockedMessage(project.id).collectAsState(initial = "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer.")
     var vpnBlockedMsg by remember(vpnBlockedMsgFlow) { mutableStateOf(vpnBlockedMsgFlow) }
@@ -2759,6 +2762,59 @@ private fun ControlTab(
                         Text("Cancel Connecting", color = StatusRed, fontWeight = FontWeight.Bold)
                     }
                 } else {
+                    if (savedTunnelTokens.isNotEmpty()) {
+                        var tokenDropdownExpanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = DarkSurfaceElevated,
+                                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { tokenDropdownExpanded = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Icon(Icons.Default.VpnKey, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                                        Text(
+                                            text = "Select from saved tokens (${savedTunnelTokens.size})",
+                                            fontSize = 12.sp,
+                                            color = PrimaryAccent,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Icon(Icons.Default.ExpandMore, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = tokenDropdownExpanded,
+                                onDismissRequest = { tokenDropdownExpanded = false },
+                                modifier = Modifier.background(DarkSurfaceElevated).fillMaxWidth(0.85f)
+                            ) {
+                                savedTunnelTokens.forEach { t ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(t.name, fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                                                val preview = if (t.token.length > 16) "${t.token.take(6)}...${t.token.takeLast(6)}" else "••••••"
+                                                Text(preview, fontSize = 11.sp, color = TextMuted, fontFamily = FontFamily.Monospace)
+                                            }
+                                        },
+                                        onClick = {
+                                            namedTokenInput = t.token
+                                            tokenDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
                         value = namedTokenInput,
                         onValueChange = { namedTokenInput = it },

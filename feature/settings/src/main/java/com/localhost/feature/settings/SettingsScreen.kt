@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -70,6 +71,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.filled.Build
 
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -224,6 +226,8 @@ fun SettingsScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    TunnelTokensSection(viewModel = viewModel)
+
                     RuntimesSection(
                         installedPacks = installedPacks,
                         viewModel = viewModel
@@ -260,6 +264,8 @@ fun SettingsScreen(
                         }
                     }
                 )
+
+                TunnelTokensSection(viewModel = viewModel)
 
                 RuntimesSection(
                     installedPacks = installedPacks,
@@ -342,6 +348,220 @@ fun SettingsScreen(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Got it", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun TunnelTokensSection(viewModel: SettingsViewModel) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val savedTokens by viewModel.savedTunnelTokens.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+    var tokenAlias by remember { mutableStateOf("") }
+    var tokenValue by remember { mutableStateOf("") }
+    var tokenToDelete by remember { mutableStateOf<com.localhost.core.model.SavedTunnelToken?>(null) }
+
+    Text("Cloudflare Tunnel Tokens", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Saved Tunnel Tokens", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    Text(
+                        "Save Zero Trust Named Tunnel tokens with alias names for quick reuse.",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+                Button(
+                    onClick = {
+                        tokenAlias = ""
+                        tokenValue = ""
+                        showAddDialog = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add", fontSize = 12.sp, color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (savedTokens.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DarkSurfaceElevated)
+                        .padding(14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No saved tunnel tokens. Tap 'Add' to store one.", color = TextMuted, fontSize = 12.sp)
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    savedTokens.forEach { tokenEntry ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = DarkSurfaceElevated,
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(tokenEntry.name, fontWeight = FontWeight.Bold, color = PrimaryAccent, fontSize = 13.sp)
+                                    val masked = if (tokenEntry.token.length > 16) {
+                                        "${tokenEntry.token.take(8)}••••${tokenEntry.token.takeLast(8)}"
+                                    } else {
+                                        "••••••••"
+                                    }
+                                    Text(masked, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    IconButton(
+                                        onClick = {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            val clip = ClipData.newPlainText("Tunnel Token", tokenEntry.token)
+                                            clipboard.setPrimaryClip(clip)
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            Toast.makeText(context, "Copied token for '${tokenEntry.name}'", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = TextMuted, modifier = Modifier.size(16.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { tokenToDelete = tokenEntry },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = StatusRed, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            containerColor = DarkSurfaceElevated,
+            title = {
+                Text("Save Tunnel Token", fontWeight = FontWeight.Bold, color = TextPrimary)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Save a Cloudflare Zero Trust tunnel token with an alias name for quick access across your projects.", color = TextMuted, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = tokenAlias,
+                        onValueChange = { tokenAlias = it },
+                        label = { Text("Alias Name") },
+                        placeholder = { Text("e.g. Production Web, Test Tunnel", color = TextMuted) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface
+                        )
+                    )
+                    OutlinedTextField(
+                        value = tokenValue,
+                        onValueChange = { tokenValue = it },
+                        label = { Text("Tunnel Token") },
+                        placeholder = { Text("eyJh...", color = TextMuted) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmedToken = tokenValue.trim()
+                        if (trimmedToken.isBlank()) {
+                            Toast.makeText(context, "Please enter the tunnel token", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val finalAlias = if (tokenAlias.isBlank()) "Tunnel-${trimmedToken.take(6)}" else tokenAlias.trim()
+                        viewModel.saveTunnelToken(finalAlias, trimmedToken)
+                        showAddDialog = false
+                        Toast.makeText(context, "Saved token '$finalAlias'", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Save Token", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    tokenToDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { tokenToDelete = null },
+            containerColor = DarkSurfaceElevated,
+            title = {
+                Text("Delete Token?", fontWeight = FontWeight.Bold, color = TextPrimary)
+            },
+            text = {
+                Text("Are you sure you want to delete '${entry.name}'?", color = TextSecondary, fontSize = 13.sp)
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteTunnelToken(entry.id)
+                        tokenToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { tokenToDelete = null }) {
+                    Text("Cancel", color = TextSecondary)
                 }
             }
         )
