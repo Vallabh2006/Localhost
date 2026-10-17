@@ -70,11 +70,23 @@ class MariaDBManager @Inject constructor(
     }
 
     fun checkIsPortOpen(): Boolean {
+        // Never rely on sock.exists() alone because stale socket files persist across process termination.
+        // Pure TCP 127.0.0.1:3306 check is the single source of truth.
         return try {
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress("127.0.0.1", 3306), 350)
-                true
-            }
+            val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+            val future = executor.submit(java.util.concurrent.Callable {
+                try {
+                    Socket().use { socket ->
+                        socket.connect(InetSocketAddress("127.0.0.1", 3306), 400)
+                        true
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+            })
+            val res = future.get(500, TimeUnit.MILLISECONDS)
+            executor.shutdown()
+            res
         } catch (_: Exception) {
             false
         }
@@ -224,6 +236,12 @@ class MariaDBManager @Inject constructor(
             return@withContext Result.success(Unit)
         }
 
+        // Clean up any stale socket before launching mariadbd
+        val staleSock = File(runtimeDir, "mariadb.sock")
+        if (staleSock.exists()) {
+            staleSock.delete()
+        }
+
         if (!isInstalled()) {
             val installRes = installMariaDB()
             if (installRes.isFailure) {
@@ -250,6 +268,21 @@ class MariaDBManager @Inject constructor(
             )
             val env = pb.environment()
             env["LD_LIBRARY_PATH"] = "${runtimeDir.absolutePath}/lib:${context.filesDir.absolutePath}/runtimes/python/lib:${context.applicationInfo.nativeLibraryDir}"
+
+            val sitePackages = File(context.filesDir, "runtimes/python/lib/python3.14/site-packages")
+            val pymysqlDir = File(sitePackages, "pymysql")
+            if (!pymysqlDir.exists()) {
+                val pythonBin = File(context.filesDir, "runtimes/python/bin/python3")
+                if (pythonBin.exists()) {
+                    try {
+                        val pipPb = ProcessBuilder(pythonBin.absolutePath, "-m", "pip", "install", "--no-deps", "pymysql")
+                        val pipEnv = pipPb.environment()
+                        pipEnv["TMPDIR"] = context.cacheDir.absolutePath
+                        pipEnv["LD_LIBRARY_PATH"] = "${context.filesDir.absolutePath}/runtimes/python/lib"
+                        pipPb.start().waitFor(30, TimeUnit.SECONDS)
+                    } catch (_: Exception) {}
+                }
+            }
 
             val logFile = File(runtimeDir, "mariadb.log")
             try {
@@ -294,6 +327,11 @@ class MariaDBManager @Inject constructor(
             try {
                 Runtime.getRuntime().exec(arrayOf("sh", "-c", "pkill -15 mariadbd || pkill -9 mariadbd")).waitFor(2, TimeUnit.SECONDS)
             } catch (_: Exception) {}
+
+            val sockFile = File(runtimeDir, "mariadb.sock")
+            if (sockFile.exists()) {
+                sockFile.delete()
+            }
 
             var attempts = 0
             while (attempts < 15 && checkIsPortOpen()) {

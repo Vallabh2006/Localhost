@@ -1,5 +1,7 @@
 package com.localhost.feature.projects.database
 
+import android.os.Build
+
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -24,6 +26,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
+
+data class DbTerminalLine(
+    val command: String,
+    val output: String,
+    val isError: Boolean = false
+)
 
 data class TableSchemaEntry(
     val tableName: String,
@@ -77,6 +85,14 @@ class DatabaseViewModel @Inject constructor(
     private val _queryResult = MutableStateFlow<QueryResult?>(null)
     val queryResult: StateFlow<QueryResult?> = _queryResult.asStateFlow()
 
+    private val _dbTerminalHistory = MutableStateFlow<List<DbTerminalLine>>(listOf(
+        DbTerminalLine("", "MariaDB 13.0 CLI Terminal Ready.\nType SQL commands (e.g. SHOW DATABASES;, SHOW TABLES;) or 'help'.\n")
+    ))
+    val dbTerminalHistory: StateFlow<List<DbTerminalLine>> = _dbTerminalHistory.asStateFlow()
+
+    private val _dbTerminalRunning = MutableStateFlow(false)
+    val dbTerminalRunning: StateFlow<Boolean> = _dbTerminalRunning.asStateFlow()
+
     private val _users = MutableStateFlow<List<DatabaseUser>>(emptyList())
     val users: StateFlow<List<DatabaseUser>> = _users.asStateFlow()
 
@@ -93,12 +109,26 @@ class DatabaseViewModel @Inject constructor(
 
     fun isMariaDBInstalled(): Boolean = mariaDBManager.isInstalled()
 
+    private suspend fun seedDemoDatabaseIfEmpty() {
+        try {
+            val dbs = databaseClient.listDatabases(_selectedEngine.value)
+            if ("cats_db" !in dbs) {
+                databaseClient.executeQuery(_selectedEngine.value, "", "CREATE DATABASE IF NOT EXISTS `cats_db`;")
+                databaseClient.executeQuery(_selectedEngine.value, "cats_db", "CREATE TABLE IF NOT EXISTS `owners` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(100) NOT NULL, `email` VARCHAR(100));")
+                databaseClient.executeQuery(_selectedEngine.value, "cats_db", "CREATE TABLE IF NOT EXISTS `cats` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(100) NOT NULL, `breed` VARCHAR(50) DEFAULT 'Domestic', `age` INT DEFAULT 1, `owner_id` INT, INDEX (`owner_id`));")
+                databaseClient.executeQuery(_selectedEngine.value, "cats_db", "INSERT IGNORE INTO `owners` (`id`, `name`, `email`) VALUES (1, 'Alice', 'alice@localhost'), (2, 'Bob', 'bob@localhost');")
+                databaseClient.executeQuery(_selectedEngine.value, "cats_db", "INSERT IGNORE INTO `cats` (`id`, `name`, `breed`, `age`, `owner_id`) VALUES (1, 'Luna', 'Siamese', 3, 1), (2, 'Milo', 'Tabby', 2, 1), (3, 'Oliver', 'Persian', 4, 2);")
+            }
+        } catch (_: Throwable) {}
+    }
+
     fun checkServiceStatus() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val isPortOpen = mariaDBManager.checkIsPortOpen()
             _isMysqlConnected.value = isPortOpen
             if (isPortOpen) {
                 _mysqlMessage.value = "MariaDB Server is running on 127.0.0.1:3306"
+                seedDemoDatabaseIfEmpty()
                 loadDatabases()
                 loadUsers()
             } else {
@@ -186,6 +216,7 @@ class DatabaseViewModel @Inject constructor(
                 _isMysqlConnected.value = true
                 _mysqlMessage.value = "MariaDB running on 127.0.0.1:3306"
                 addLog("[SERVICE] MariaDB service active on port 3306")
+                seedDemoDatabaseIfEmpty()
                 loadDatabases()
                 loadUsers()
             } else {
@@ -336,6 +367,9 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun executeQuery(sql: String) {
+        if (!_isMysqlConnected.value && mariaDBManager.checkIsPortOpen()) {
+            _isMysqlConnected.value = true
+        }
         if (!_isMysqlConnected.value) {
             val err = "Cannot execute query: MariaDB service is offline. Start the service first."
             _queryResult.value = QueryResult(isSuccess = false, errorMessage = err)
@@ -528,6 +562,144 @@ class DatabaseViewModel @Inject constructor(
                     Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
                 addLog("[ERROR] Export error: ${e.message}")
+            }
+        }
+    }
+
+    fun clearDbTerminal() {
+        _dbTerminalHistory.value = emptyList()
+    }
+
+    private fun updateTerminalLine(index: Int, cmd: String, output: String, isError: Boolean) {
+        val list = _dbTerminalHistory.value.toMutableList()
+        if (index < list.size) {
+            list[index] = DbTerminalLine(cmd, output, isError)
+            _dbTerminalHistory.value = list
+        }
+    }
+
+    private fun formatAsciiTable(columns: List<String>, rows: List<List<String>>, elapsedMs: Long): String {
+        val colWidths = columns.mapIndexed { idx, col ->
+            val maxRowLen = rows.maxOfOrNull { r -> if (idx < r.size) (r[idx] ?: "NULL").length else 0 } ?: 0
+            maxOf(col.length, maxRowLen, 1)
+        }
+        val sep = "+" + colWidths.joinToString("+") { "-".repeat(it + 2) } + "+"
+        val header = "| " + columns.mapIndexed { i, col -> col.padEnd(colWidths[i]) }.joinToString(" | ") + " |"
+        val body = rows.joinToString("\n") { r ->
+            "| " + columns.mapIndexed { i, _ ->
+                val cell = if (i < r.size) r[i] ?: "NULL" else "NULL"
+                cell.padEnd(colWidths[i])
+            }.joinToString(" | ") + " |"
+        }
+        val count = "${rows.size} row${if (rows.size == 1) "" else "s"} in set (${String.format(java.util.Locale.US, "%.2f", elapsedMs / 1000.0)} sec)"
+        return if (rows.isEmpty()) {
+            "$sep\n$header\n$sep\nEmpty set (${String.format(java.util.Locale.US, "%.2f", elapsedMs / 1000.0)} sec)"
+        } else {
+            "$sep\n$header\n$sep\n$body\n$sep\n$count"
+        }
+    }
+
+    fun runDbTerminalCommand(rawCmd: String) {
+        val cmd = rawCmd.trim()
+        if (cmd.isEmpty()) return
+        viewModelScope.launch {
+            _dbTerminalRunning.value = true
+            val currentList = _dbTerminalHistory.value.toMutableList()
+            val targetIndex = currentList.size
+            currentList.add(DbTerminalLine(cmd, ""))
+            _dbTerminalHistory.value = currentList
+
+            val lower = cmd.lowercase().removeSuffix(";").trim()
+            when {
+                lower == "clear" || lower == "cls" -> {
+                    _dbTerminalHistory.value = emptyList()
+                    _dbTerminalRunning.value = false
+                    return@launch
+                }
+                lower == "help" || lower == "\\h" -> {
+                    val helpText = """
+                        MariaDB Interactive CLI Commands:
+                          SHOW DATABASES;
+                          USE <database_name>;
+                          SHOW TABLES;
+                          DESCRIBE <table_name>;
+                          SELECT * FROM <table_name> LIMIT 50;
+                          STATUS;
+                          clear : Clear terminal screen
+                    """.trimIndent()
+                    updateTerminalLine(targetIndex, cmd, helpText, false)
+                    _dbTerminalRunning.value = false
+                    return@launch
+                }
+                lower == "status" || lower == "\\s" -> {
+                    val statusText = """
+                        --------------
+                        mariadb  Ver 13.0.2 Distrib for Linux (${Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64"})
+                        Current database:  ${_selectedDatabase.value.ifBlank { "(none)" }}
+                        Current user:      root@127.0.0.1
+                        Server version:    13.0.2-MariaDB
+                        Connection:        127.0.0.1 via TCP/IP (port 3306)
+                        TCP port:          3306
+                        --------------
+                    """.trimIndent()
+                    updateTerminalLine(targetIndex, cmd, statusText, false)
+                    _dbTerminalRunning.value = false
+                    return@launch
+                }
+                lower.startsWith("use ") -> {
+                    val dbName = cmd.substring(4).trim().removeSuffix(";").removeSurrounding("`").removeSurrounding("'")
+                    if (dbName.isNotEmpty()) {
+                        _selectedDatabase.value = dbName
+                        loadTables(dbName)
+                        loadAllSchemas(dbName)
+                        updateTerminalLine(targetIndex, cmd, "Database changed to '$dbName'", false)
+                    } else {
+                        updateTerminalLine(targetIndex, cmd, "ERROR 1046 (3D000): No database selected", true)
+                    }
+                    _dbTerminalRunning.value = false
+                    return@launch
+                }
+                else -> {
+                    if (!_isMysqlConnected.value && mariaDBManager.checkIsPortOpen()) {
+                        _isMysqlConnected.value = true
+                    }
+                    if (!_isMysqlConnected.value) {
+                        updateTerminalLine(targetIndex, cmd, "ERROR 2002 (HY000): Can't connect to local server (service is offline)\nTip: Tap 'Start Service' or start MariaDB in the Controls & Settings tab.", true)
+                        _dbTerminalRunning.value = false
+                        return@launch
+                    }
+                    val res = databaseClient.executeQuery(_selectedEngine.value, _selectedDatabase.value, cmd)
+                    val output = if (res.isSuccess) {
+                        if (res.columns.isNotEmpty()) {
+                            formatAsciiTable(res.columns, res.rows, res.executionTimeMs)
+                        } else {
+                            "Query OK, ${res.affectedRows} row(s) affected (${String.format(java.util.Locale.US, "%.2f", res.executionTimeMs / 1000.0)} sec)"
+                        }
+                    } else {
+                        "ERROR 1064 (42000): ${res.errorMessage ?: "Query execution failed"}"
+                    }
+                    updateTerminalLine(targetIndex, cmd, output, !res.isSuccess)
+                    if (res.isSuccess) {
+                        loadTables(_selectedDatabase.value)
+                        loadAllSchemas(_selectedDatabase.value)
+                    }
+                    _dbTerminalRunning.value = false
+                }
+            }
+        }
+    }
+
+    fun refreshActiveData() {
+        viewModelScope.launch {
+            loadDatabases()
+            val db = _selectedDatabase.value
+            if (db.isNotBlank()) {
+                loadTables(db)
+                loadAllSchemas(db)
+                _selectedTable.value?.let { tbl ->
+                    loadTableSchema(db, tbl)
+                    loadTableData(db, tbl)
+                }
             }
         }
     }

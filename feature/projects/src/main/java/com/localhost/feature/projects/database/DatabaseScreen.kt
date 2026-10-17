@@ -1,5 +1,20 @@
 package com.localhost.feature.projects.database
 
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.localhost.core.designsystem.theme.StatusYellow
+import com.localhost.core.designsystem.theme.TextOnAccent
+import com.localhost.core.designsystem.theme.TextPrimary
+import com.localhost.core.designsystem.theme.TextSecondary
+import com.localhost.core.designsystem.theme.TextMuted
+
+
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -146,7 +161,33 @@ fun DatabaseScreen(
         uri?.let { viewModel.importSqlFile(context, it) }
     }
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Dashboard", "Explorer", "Visualize", "Query Console", "Users & Perms", "Export Database", "Logs")
+    val dbTerminalHistory by viewModel.dbTerminalHistory.collectAsState()
+    val dbTerminalRunning by viewModel.dbTerminalRunning.collectAsState()
+    val tabs = listOf("Controls & Settings", "Explorer", "Visualize", "Terminal (CLI)", "Query Console", "Users & Perms", "Export Database", "Logs")
+
+    LaunchedEffect(Unit) {
+        viewModel.checkServiceStatus()
+    }
+
+    LaunchedEffect(selectedTab) {
+        viewModel.checkServiceStatus()
+        if (selectedTab == 1) {
+            viewModel.loadDatabases()
+            if (selectedDb.isNotBlank()) {
+                viewModel.loadTables(selectedDb)
+                val curTable = selectedTable
+                if (curTable != null) {
+                    viewModel.loadTableSchema(selectedDb, curTable)
+                    viewModel.loadTableData(selectedDb, curTable)
+                }
+            }
+        } else if (selectedTab == 2) {
+            viewModel.loadDatabases()
+            if (selectedDb.isNotBlank()) {
+                viewModel.loadAllSchemas(selectedDb)
+            }
+        }
+    }
 
     var sqlQueryInput by remember { mutableStateOf("") }
     var showCreateUserDialog by remember { mutableStateOf(false) }
@@ -162,7 +203,12 @@ fun DatabaseScreen(
     val activeConfig = mysqlConfig
     val activeConnected = isMysqlConnected
 
+    LaunchedEffect(Unit) {
+        viewModel.checkServiceStatus()
+    }
+
     LaunchedEffect(selectedTab) {
+        viewModel.checkServiceStatus()
         if (selectedTab == 1) {
             viewModel.loadDatabases()
             if (selectedDb.isNotBlank()) {
@@ -286,6 +332,8 @@ fun DatabaseScreen(
                             selectedTable = selectedTable,
                             tableSchema = tableSchema,
                             tableData = tableData,
+                            isConnected = activeConnected,
+                            onStartService = { viewModel.connect() },
                             onSelectDb = { viewModel.selectDatabase(it) },
                             onSelectTable = { db, tbl -> viewModel.selectTable(db, tbl) },
                             onRefresh = {
@@ -301,6 +349,8 @@ fun DatabaseScreen(
                             databases = databases,
                             selectedDb = selectedDb,
                             allSchemas = allTableSchemas,
+                            isConnected = activeConnected,
+                            onStartService = { viewModel.connect() },
                             onSelectDb = { viewModel.selectDatabase(it) },
                             onRefresh = {
                                 viewModel.loadDatabases()
@@ -311,6 +361,16 @@ fun DatabaseScreen(
                         )
                     }
                     3 -> {
+                        DatabaseCliTerminalTab(
+                            terminalHistory = dbTerminalHistory,
+                            isRunning = dbTerminalRunning,
+                            isConnected = activeConnected,
+                            onStartService = { viewModel.connect() },
+                            onRunCommand = { viewModel.runDbTerminalCommand(it) },
+                            onClear = { viewModel.clearDbTerminal() }
+                        )
+                    }
+                    4 -> {
                         QueryConsoleTab(
                             query = sqlQueryInput,
                             onQueryChange = { sqlQueryInput = it },
@@ -321,7 +381,7 @@ fun DatabaseScreen(
                             engine = selectedEngine
                         )
                     }
-                    4 -> {
+                    5 -> {
                         UsersTab(
                             users = users,
                             onCreateUser = { showCreateUserDialog = true },
@@ -330,7 +390,7 @@ fun DatabaseScreen(
                             onGrant = { showGrantDialog = it }
                         )
                     }
-                    5 -> {
+                    6 -> {
                         ExportDatabaseTab(
                             databases = databases,
                             selectedDb = selectedDb,
@@ -342,7 +402,7 @@ fun DatabaseScreen(
                             onImport = { importSqlLauncher.launch("*/*") }
                         )
                     }
-                    6 -> {
+                    7 -> {
                         DatabaseLogsTab(
                             logs = databaseLogs,
                             onClearLogs = { viewModel.clearLogs() }
@@ -555,115 +615,121 @@ private fun DatabaseDashboardTab(
     onRestart: () -> Unit,
     onTest: () -> Unit
 ) {
+    val haptics = LocalHapticFeedback.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .padding(vertical = 4.dp)
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Card 1: Server Process Control (styled identically to Project Process Control)
         Card(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
             border = BorderStroke(1.dp, if (isConnected) StatusGreen.copy(alpha = 0.4f) else DarkBorder)
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Column {
-                            Text(
-                                text = "MariaDB Server (Port 3306)",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = if (isConnected) "Port ${config.port} (Active)" else "Port ${config.port} (Stopped)",
-                                fontSize = 11.sp,
-                                color = TextMuted
-                            )
-                        }
-                    }
-
+                    Text("Server Process Control", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isConnected) StatusGreen.copy(alpha = 0.15f) else StatusRed.copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, if (isConnected) StatusGreen else StatusRed)
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isConnected) StatusGreen.copy(alpha = 0.15f) else TextMuted.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, if (isConnected) StatusGreen.copy(alpha = 0.4f) else DarkBorderSubtle)
                     ) {
                         Text(
-                            text = if (isConnected) "ONLINE" else "STOPPED",
-                            color = if (isConnected) StatusGreen else StatusRed,
-                            fontSize = 10.sp,
+                            text = if (isConnected) "ONLINE (: ${config.port})" else "STOPPED",
+                            color = if (isConnected) StatusGreen else TextMuted,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                 }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (isConnected) {
-                        OutlinedButton(
-                            onClick = onStop,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
-                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(42.dp)
+                if (isConnected) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onStop()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = StatusYellow),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = null, tint = StatusRed, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Stop Service", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Icon(Icons.Default.Stop, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Stop Service", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
-                            onClick = onRestart,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onRestart()
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(42.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
                         ) {
-                            Icon(Icons.Default.RestartAlt, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Restart", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Restart Service", color = TextOnAccent, fontWeight = FontWeight.Bold)
                         }
-                    } else {
-                        Button(
-                            onClick = onStart,
-                            colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().height(42.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Start Service", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onStart()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Start Service", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
+        // Card 2: Connection & Engine Settings
         Card(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
             border = BorderStroke(1.dp, DarkBorder)
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Connection & Credentials", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
-                    OutlinedButton(
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Storage, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Connection & Settings", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                    }
+
+                    Button(
                         onClick = onTest,
                         enabled = isConnected,
-                        shape = RoundedCornerShape(6.dp),
-                        border = BorderStroke(1.dp, if (isConnected) DarkBorder else DarkBorder.copy(alpha = 0.3f)),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.height(30.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated, disabledContainerColor = DarkSurfaceElevated.copy(alpha = 0.5f)),
+                        border = BorderStroke(1.dp, if (isConnected) PrimaryAccent.copy(alpha = 0.5f) else DarkBorderSubtle),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier.height(32.dp)
                     ) {
-                        Text("Test Connection", fontSize = 11.sp, color = if (isConnected) TextPrimary else TextMuted)
+                        Icon(Icons.Default.Check, contentDescription = null, tint = if (isConnected) PrimaryAccent else TextMuted, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Test Connection", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (isConnected) TextPrimary else TextMuted)
                     }
                 }
 
@@ -755,58 +821,100 @@ private fun DatabaseDashboardTab(
                 }
 
                 statusMessage?.let { msg ->
-                    Text(
-                        text = msg,
-                        fontSize = 11.sp,
-                        color = if (isConnected) StatusGreen else StatusRed,
-                        fontFamily = FontFamily.Monospace,
-                        lineHeight = 14.sp
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = DarkSurfaceElevated,
+                        border = BorderStroke(1.dp, if (isConnected) StatusGreen.copy(alpha = 0.3f) else StatusRed.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = msg,
+                            fontSize = 11.sp,
+                            color = if (isConnected) StatusGreen else StatusRed,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 15.sp,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
                 }
             }
         }
 
+        // Card 3: Service Telemetry & Stats (Styled identically to Project Stats)
         Card(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
             border = BorderStroke(1.dp, DarkBorder)
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Service Telemetry & Stats", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Service Telemetry & Stats", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = DarkSurfaceElevated,
                         border = BorderStroke(1.dp, DarkBorderSubtle),
-                        modifier = Modifier.weight(1f).padding(vertical = 4.dp)
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text("Databases", fontSize = 10.sp, color = TextMuted)
-                            Text("${databases.size}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Databases", fontSize = 11.sp, color = TextMuted)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("${databases.size}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PrimaryAccent)
                         }
                     }
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = DarkSurfaceElevated,
                         border = BorderStroke(1.dp, DarkBorderSubtle),
-                        modifier = Modifier.weight(1f).padding(vertical = 4.dp)
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text("Users", fontSize = 10.sp, color = TextMuted)
-                            Text("${users.size}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Users", fontSize = 11.sp, color = TextMuted)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("${users.size}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                         }
                     }
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = DarkSurfaceElevated,
                         border = BorderStroke(1.dp, DarkBorderSubtle),
-                        modifier = Modifier.weight(1f).padding(vertical = 4.dp)
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text("Default DB", fontSize = 10.sp, color = TextMuted)
-                            Text("localhost_app", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, maxLines = 1)
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Port", fontSize = 11.sp, color = TextMuted)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("${config.port}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = StatusGreen)
                         }
                     }
+                }
+            }
+        }
+
+        // Card 4: Danger Zone
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Danger Zone", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = StatusRed)
+                Text(
+                    "Service operations and maintenance controls for MariaDB daemon and process files.",
+                    color = TextSecondary,
+                    fontSize = 12.sp
+                )
+
+                Button(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onRestart()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                ) {
+                    Icon(Icons.Default.RestartAlt, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Restart MariaDB Daemon", color = TextOnAccent, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -821,11 +929,46 @@ private fun ExplorerTab(
     selectedTable: String?,
     tableSchema: List<com.localhost.core.model.ColumnInfo>,
     tableData: com.localhost.core.model.TableData?,
+    isConnected: Boolean,
+    onStartService: () -> Unit,
     onSelectDb: (String) -> Unit,
     onSelectTable: (String, String) -> Unit,
     onRefresh: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!isConnected) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = StatusOrange.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, StatusOrange.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = StatusOrange, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "MariaDB service is offline",
+                            color = StatusOrange,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Button(
+                        onClick = onStartService,
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("Start Service", color = androidx.compose.ui.graphics.Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1071,12 +1214,51 @@ private fun VisualizeTab(
     databases: List<String>,
     selectedDb: String,
     allSchemas: List<TableSchemaEntry>,
+    isConnected: Boolean,
+    onStartService: () -> Unit,
     onSelectDb: (String) -> Unit,
     onRefresh: () -> Unit
 ) {
     var showForeignKeys by remember { mutableStateOf(true) }
 
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!isConnected) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = StatusOrange.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, StatusOrange.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = StatusOrange, modifier = Modifier.size(24.dp))
+                    Text(
+                        "MariaDB Service is Offline",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = TextPrimary
+                    )
+                    Text(
+                        "Start MariaDB to visualize tables, ER relations, and live column schemas.",
+                        fontSize = 11.sp,
+                        color = TextMuted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Button(
+                        onClick = onStartService,
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Start Service", color = androidx.compose.ui.graphics.Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1765,6 +1947,254 @@ private fun DatabaseLogsTab(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun DatabaseCliTerminalTab(
+    terminalHistory: List<DbTerminalLine>,
+    isRunning: Boolean,
+    isConnected: Boolean,
+    onStartService: () -> Unit,
+    onRunCommand: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    var input by remember { mutableStateOf("") }
+    var historyIndex by remember { mutableIntStateOf(-1) }
+    val listState = rememberLazyListState()
+    val context = LocalContext.current
+
+    val accessoryKeys = listOf("SHOW DATABASES;", "SHOW TABLES;", "STATUS;", "SELECT * FROM ", "DESCRIBE ", "Ctrl+C", "clear")
+
+    val lastOutputLength = terminalHistory.lastOrNull()?.output?.length ?: 0
+    LaunchedEffect(terminalHistory.size, lastOutputLength) {
+        if (terminalHistory.isNotEmpty()) {
+            listState.scrollToItem(terminalHistory.size - 1, 10000)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (!isConnected) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = StatusOrange.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, StatusOrange.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = StatusOrange, modifier = Modifier.size(15.dp))
+                        Text(
+                            text = "MariaDB service is offline",
+                            color = StatusOrange,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Button(
+                        onClick = onStartService,
+                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(26.dp)
+                    ) {
+                        Text("Start Service", color = androidx.compose.ui.graphics.Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+        Surface(
+            color = DarkSurface,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(terminalHistory) { item ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val text = if (item.command.isNotBlank()) "mariadb> ${item.command}\n${item.output}" else item.output
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clip = android.content.ClipData.newPlainText("Terminal Output", text)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Output copied to clipboard", Toast.LENGTH_SHORT).show()
+                            }
+                    ) {
+                        if (item.command.isNotBlank()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "mariadb> ",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = StatusGreen
+                                )
+                                Text(
+                                    text = item.command,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary
+                                )
+                            }
+                        }
+                        if (item.output.isNotBlank()) {
+                            Text(
+                                text = item.output,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = if (item.isError) StatusRed else TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val commands = terminalHistory.map { it.command }.filter { it.isNotBlank() }
+            Surface(
+                color = DarkSurface,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, DarkBorderSubtle),
+                modifier = Modifier.clickable {
+                    if (commands.isNotEmpty() && historyIndex < commands.size - 1) {
+                        historyIndex++
+                        input = commands[commands.size - 1 - historyIndex]
+                    }
+                }
+            ) {
+                Text("↑", fontSize = 14.sp, color = TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+            }
+
+            Surface(
+                color = DarkSurface,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, DarkBorderSubtle),
+                modifier = Modifier.clickable {
+                    if (commands.isNotEmpty() && historyIndex > 0) {
+                        historyIndex--
+                        input = commands[commands.size - 1 - historyIndex]
+                    } else if (historyIndex == 0) {
+                        historyIndex = -1
+                        input = ""
+                    }
+                }
+            ) {
+                Text("↓", fontSize = 14.sp, color = TextPrimary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+            }
+
+            accessoryKeys.forEach { key ->
+                Surface(
+                    color = DarkSurface,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, DarkBorderSubtle),
+                    modifier = Modifier.clickable {
+                        when (key) {
+                            "clear" -> onClear()
+                            "Ctrl+C" -> input = ""
+                            else -> input += if (input.isEmpty()) key else " $key"
+                        }
+                    }
+                ) {
+                    Text(
+                        text = key,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
+        Surface(
+            color = DarkSurface,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, DarkBorderSubtle),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "mariadb> ",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = StatusGreen
+                )
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        color = TextPrimary
+                    ),
+                    cursorBrush = SolidColor(PrimaryAccent),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = {
+                        val toSend = input.trim()
+                        if (toSend.isNotBlank()) {
+                            onRunCommand(toSend)
+                            input = ""
+                            historyIndex = -1
+                        }
+                    }),
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = {
+                        val toSend = input.trim()
+                        if (toSend.isNotBlank()) {
+                            onRunCommand(toSend)
+                            input = ""
+                            historyIndex = -1
+                        }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Execute",
+                        tint = PrimaryAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }

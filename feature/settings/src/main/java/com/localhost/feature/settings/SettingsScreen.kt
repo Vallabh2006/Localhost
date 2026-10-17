@@ -825,7 +825,7 @@ private fun AboutSection() {
                     color = PrimaryAccentContainer,
                     border = BorderStroke(1.dp, PrimaryAccent)
                 ) {
-                    Text("v1.0.4", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    Text("v1.0.5", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
             }
 
@@ -899,7 +899,7 @@ private fun AboutSection() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Latest Changes in v1.0.3", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                Text("Latest Changes in v1.0.5", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
                 Icon(
                     if (showChangelog) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
@@ -917,11 +917,12 @@ private fun AboutSection() {
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val changelogItems = listOf(
-                            "Complete Segregation of Port Forwarding & Cloudflare Named Tunnels: Completely isolated states, controls, and inputs between quick HTTPS port forwarding and Cloudflare Zero Trust named token tunnels without crosstalk.",
-                            "Independent Concurrent Tunnels & Auto-Reconnect: Both Port Forwarding and Cloudflare Named Tunnels can run simultaneously with automatic reconnection resilience and HTTP/2 transport over mobile carrier networks.",
-                            "Full MariaDB Database Engine: Complete MariaDB client and manager supporting table creation, interactive data viewer, full-fidelity SQL query console, and SQL/CSV import & export.",
-                            "Runtime Package Manager Streamlining: Cleaned up installed package cards in Settings by removing redundant status checkmarks and keeping simple one-tap uninstall buttons.",
-                            "Process & Dynamic Library Fixes: Fixed native shared library dependencies for MariaDB (runtimes/mariadb/lib) and eliminated process detachment crashes."
+                            "Interactive Database CLI Terminal: Full-featured MariaDB terminal tab with monospace ASCII grid-table formatting (+----+----+), command history navigation (↑/↓), quick SQL accessory keys, and click-to-copy results.",
+                            "Database Controls & Settings Redesign: Aligned database dashboard cards with project control UI featuring 16.dp rounded surfaces, status chip badges, large process buttons, and telemetry stat tiles.",
+                            "Database Explorer & Visualizer Auto-Refresh & 1-Tap Recovery: Instant schema and table auto-refresh on tab switch with persistent Refresh buttons and 1-tap 'Start Service' recovery banners when MariaDB is stopped.",
+                            "MariaDB Service Health & Stale Socket Fix: Dispatched TCP 127.0.0.1:3306 health checks to IO background threads, purged stale socket files on start/stop, and added seamless Unix socket to TCP fallback.",
+                            "Starter Database Auto-Seeding: Automatically seeds cats_db with sample relational tables (owners, cats) and foreign keys on first boot for instant ER diagram visualization.",
+                            "Symlink-Aware Project Deletion: Fixed recursive deletion of broken symlinks in Python virtual environments (.venv/bin/) to prevent deleted projects from resurrecting as Static HTML entities."
                         )
                         changelogItems.forEach { item ->
                             Row(

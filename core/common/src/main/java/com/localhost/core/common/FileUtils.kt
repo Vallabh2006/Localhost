@@ -48,11 +48,29 @@ object FileUtils {
     }
 
     fun deleteRecursively(file: File): Boolean {
-        if (!file.exists()) return true
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val path = file.toPath()
+                if (java.nio.file.Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    java.nio.file.Files.walkFileTree(path, object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                        override fun visitFile(f: java.nio.file.Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
+                            java.nio.file.Files.deleteIfExists(f)
+                            return java.nio.file.FileVisitResult.CONTINUE
+                        }
+                        override fun postVisitDirectory(dir: java.nio.file.Path, exc: java.io.IOException?): java.nio.file.FileVisitResult {
+                            java.nio.file.Files.deleteIfExists(dir)
+                            return java.nio.file.FileVisitResult.CONTINUE
+                        }
+                    })
+                }
+                return true
+            }
+        } catch (_: Exception) {}
+
         if (file.isDirectory) {
             file.listFiles()?.forEach { deleteRecursively(it) }
         }
-        return file.delete()
+        return file.delete() || !file.exists()
     }
 
     fun zipDirectory(

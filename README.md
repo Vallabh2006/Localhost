@@ -172,6 +172,16 @@ Localhost/
 
 ---
 
+## Changes in Version 1.0.5
+
+- Interactive Database CLI Terminal: Added a full-featured interactive MariaDB CLI terminal tab supporting standard SQL commands (`SHOW DATABASES;`, `SHOW TABLES;`, `DESCRIBE <table>;`, `SELECT ...;`, `USE <db>;`, `STATUS;`, `clear`, `help`). Features clean ASCII grid-table formatting for query results (`+----+----+`) with timing and rows affected, command history navigation with `↑` and `↓` buttons, quick accessory keys, and click-to-copy output.
+- Harmonized Database Controls & Dashboard UI: Redesigned the Database Controls & Settings dashboard using 16.dp rounded surface cards matching the Project Details Control tab. Features dynamic process status chip badges (`ONLINE (: 3306)` / `STOPPED`), large process control buttons, structured connection settings with toggleable password visibility, live telemetry metric tiles (Databases, Users, Port), and a dedicated Danger Zone card.
+- Database Explorer & Visualizer Auto-Refresh & 1-Tap Recovery: Automatic reload of database lists, table inventories, schemas, and live rows on tab switch with persistent Refresh buttons. Added 1-tap "Start Service" notification banners across Explorer, Visualize, and Terminal tabs whenever MariaDB is stopped.
+- MariaDB Service Health Check & Stale Socket Fix: Replaced dead `.sock` file checks with reliable TCP `127.0.0.1:3306` socket health checks dispatched to background IO threads. Automatically purges stale `mariadb.sock` files before daemon startup and upon shutdown, preventing false "online" UI states and deadlock loops.
+- Resilient Query Execution & Dual Socket/TCP Fallback: Updated the internal Python query runner (`db_query.py`) to attempt Unix domain socket connections first and gracefully fall back to TCP `127.0.0.1:3306`.
+- Starter Database Auto-Seeding (`cats_db`): Automatically seeds a relational starter database with sample tables (`owners`, `cats`) and foreign keys on first daemon boot, allowing instant ER diagram inspection and foreign key relation line visualization in the Visualize tab.
+- Symlink-Aware Project Deletion: Fixed an issue where projects with broken symlinks inside Python virtual environments (`.venv/bin/`) failed recursive file deletion and caused deleted projects to auto-resurrect as Static HTML projects. Upgraded file tree deletion to use `LinkOption.NOFOLLOW_LINKS` and updated filesystem synchronization to ignore hidden residue.
+
 ## Changes in Version 1.0.4
 
 - Shared File Project Creation with Stack & Port Configuration: Seamless project creation when sharing ZIP archives or snippets from external applications (WhatsApp, file managers, browsers). Users can customize Project Name, select the desired Runtime Stack (Python, Node.js, PHP, Static, Java), and specify a custom Port number, with automatic `.venv` configuration for Python projects.

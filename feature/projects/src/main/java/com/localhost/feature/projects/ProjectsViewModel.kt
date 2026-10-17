@@ -317,7 +317,7 @@ class ProjectsViewModel @Inject constructor(
     }
 
     fun deleteProject(projectId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val p = projectRepository.getById(projectId)
             processSupervisor.stopProject(projectId)
             if (p != null) {
@@ -1491,7 +1491,8 @@ class ProjectsViewModel @Inject constructor(
 
             folders.forEach { folder ->
                 val files = folder.listFiles()
-                if (!existingPaths.contains(folder.canonicalPath) && !files.isNullOrEmpty()) {
+                val visibleFiles = files?.filter { !it.name.startsWith(".") } ?: emptyList()
+                if (!existingPaths.contains(folder.canonicalPath) && visibleFiles.isNotEmpty()) {
                     val name = folder.name
                     val runtime = when {
                         File(folder, "app.py").exists() || File(folder, "main.py").exists() || File(folder, "requirements.txt").exists() -> com.localhost.core.model.RuntimeType.PYTHON
