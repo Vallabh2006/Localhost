@@ -336,6 +336,8 @@ fun DatabaseScreen(
                             onStartService = { viewModel.connect() },
                             onSelectDb = { viewModel.selectDatabase(it) },
                             onSelectTable = { db, tbl -> viewModel.selectTable(db, tbl) },
+                            onCreateDb = { viewModel.createDatabase(it) },
+                            onDropDb = { viewModel.dropDatabase(it) },
                             onRefresh = {
                                 viewModel.loadDatabases()
                                 if (selectedDb.isNotBlank()) {
@@ -933,8 +935,84 @@ private fun ExplorerTab(
     onStartService: () -> Unit,
     onSelectDb: (String) -> Unit,
     onSelectTable: (String, String) -> Unit,
+    onCreateDb: (String) -> Unit,
+    onDropDb: (String) -> Unit,
     onRefresh: () -> Unit
 ) {
+    var showCreateDbDialog by remember { mutableStateOf(false) }
+    var showDropDbDialog by remember { mutableStateOf(false) }
+    var newDbInput by remember { mutableStateOf("") }
+
+    if (showCreateDbDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateDbDialog = false },
+            title = { Text("Create Database", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text = {
+                OutlinedTextField(
+                    value = newDbInput,
+                    onValueChange = { newDbInput = it.lowercase().replace(" ", "_") },
+                    placeholder = { Text("database_name", color = TextMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryAccent,
+                        unfocusedBorderColor = DarkBorderSubtle
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = newDbInput.trim()
+                        if (trimmed.isNotEmpty()) {
+                            onCreateDb(trimmed)
+                            newDbInput = ""
+                            showCreateDbDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent)
+                ) {
+                    Text("Create", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateDbDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = DarkSurfaceElevated
+        )
+    }
+
+    if (showDropDbDialog && selectedDb.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { showDropDbDialog = false },
+            title = { Text("Drop Database", fontWeight = FontWeight.Bold, color = StatusRed) },
+            text = {
+                Text("Are you sure you want to permanently delete database '$selectedDb'? All contained tables and records will be lost.", color = TextSecondary, fontSize = 13.sp)
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDropDb(selectedDb)
+                        showDropDbDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed)
+                ) {
+                    Text("Drop Database", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDropDbDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = DarkSurfaceElevated
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!isConnected) {
             Surface(
@@ -1082,11 +1160,27 @@ private fun ExplorerTab(
                 }
             }
 
-            IconButton(
-                onClick = onRefresh,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = PrimaryAccent, modifier = Modifier.size(18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = { showCreateDbDialog = true },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "New Database", tint = PrimaryAccent, modifier = Modifier.size(17.dp))
+                }
+                if (selectedDb.isNotBlank() && selectedDb != "mysql" && selectedDb != "information_schema") {
+                    IconButton(
+                        onClick = { showDropDbDialog = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Drop Database", tint = StatusRed, modifier = Modifier.size(17.dp))
+                    }
+                }
+                IconButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = PrimaryAccent, modifier = Modifier.size(17.dp))
+                }
             }
         }
 

@@ -64,13 +64,13 @@ class DatabaseViewModel @Inject constructor(
     private val _databases = MutableStateFlow<List<String>>(emptyList())
     val databases: StateFlow<List<String>> = _databases.asStateFlow()
 
-    private val _selectedDatabase = MutableStateFlow("cats_db")
+    private val _selectedDatabase = MutableStateFlow("")
     val selectedDatabase: StateFlow<String> = _selectedDatabase.asStateFlow()
 
     private val _tables = MutableStateFlow<List<String>>(emptyList())
     val tables: StateFlow<List<String>> = _tables.asStateFlow()
 
-    private val _selectedTable = MutableStateFlow<String?>("cats")
+    private val _selectedTable = MutableStateFlow<String?>(null)
     val selectedTable: StateFlow<String?> = _selectedTable.asStateFlow()
 
     private val _tableSchema = MutableStateFlow<List<ColumnInfo>>(emptyList())
@@ -111,6 +111,14 @@ class DatabaseViewModel @Inject constructor(
 
     private suspend fun seedDemoDatabaseIfEmpty() {
         try {
+            val seedMarker = File(mariaDBManager.runtimeDir, ".demo_seeded")
+            if (seedMarker.exists()) {
+                return
+            }
+            try {
+                seedMarker.createNewFile()
+            } catch (_: Throwable) {}
+
             val dbs = databaseClient.listDatabases(_selectedEngine.value)
             if ("cats_db" !in dbs) {
                 databaseClient.executeQuery(_selectedEngine.value, "", "CREATE DATABASE IF NOT EXISTS `cats_db`;")
@@ -256,13 +264,16 @@ class DatabaseViewModel @Inject constructor(
             _databases.value = list
             if (list.isNotEmpty()) {
                 if (_selectedDatabase.value !in list) {
-                    val preferCat = if ("cats_db" in list) "cats_db" else list.first()
-                    _selectedDatabase.value = preferCat
+                    _selectedDatabase.value = list.first()
                 }
                 loadTables(_selectedDatabase.value)
                 loadAllSchemas(_selectedDatabase.value)
             } else {
+                _selectedDatabase.value = ""
+                _selectedTable.value = null
                 _tables.value = emptyList()
+                _tableSchema.value = emptyList()
+                _tableData.value = null
                 _allTableSchemas.value = emptyList()
             }
         }
@@ -296,6 +307,9 @@ class DatabaseViewModel @Inject constructor(
     }
 
     fun dropDatabase(name: String) {
+        if (!_isMysqlConnected.value && mariaDBManager.checkIsPortOpen()) {
+            _isMysqlConnected.value = true
+        }
         if (!_isMysqlConnected.value) {
             addLog("[ERROR] Cannot drop database: MariaDB service is offline")
             return
@@ -304,6 +318,14 @@ class DatabaseViewModel @Inject constructor(
             val res = databaseClient.executeQuery(_selectedEngine.value, "", "DROP DATABASE IF EXISTS `$name`;")
             if (res.isSuccess) {
                 addLog("[DATABASE] Dropped database '$name'")
+                if (_selectedDatabase.value.equals(name, ignoreCase = true)) {
+                    _selectedDatabase.value = ""
+                    _selectedTable.value = null
+                    _tables.value = emptyList()
+                    _tableSchema.value = emptyList()
+                    _tableData.value = null
+                    _allTableSchemas.value = emptyList()
+                }
                 loadDatabases()
             } else {
                 addLog("[ERROR] Failed to drop database: ${res.errorMessage}")
@@ -378,7 +400,21 @@ class DatabaseViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _isExecuting.value = true
-            val res = databaseClient.executeQuery(_selectedEngine.value, _selectedDatabase.value, sql)
+            val trimmed = sql.trim()
+            val lower = trimmed.lowercase().removeSuffix(";").trim()
+            if (lower.startsWith("drop database ") || lower.startsWith("drop schema ")) {
+                val droppedDb = trimmed.split("\\s+".toRegex()).getOrNull(2)?.removeSuffix(";")?.removeSurrounding("`")?.removeSurrounding("'") ?: ""
+                if (droppedDb.equals(_selectedDatabase.value, ignoreCase = true)) {
+                    _selectedDatabase.value = ""
+                    _selectedTable.value = null
+                    _tables.value = emptyList()
+                    _tableSchema.value = emptyList()
+                    _tableData.value = null
+                    _allTableSchemas.value = emptyList()
+                }
+            }
+            val targetDb = if (lower.startsWith("drop database") || lower.startsWith("create database")) "" else _selectedDatabase.value
+            val res = databaseClient.executeQuery(_selectedEngine.value, targetDb, sql)
             _queryResult.value = res
             val preview = sql.lines().firstOrNull() ?: sql
             if (res.isSuccess) {
@@ -387,8 +423,11 @@ class DatabaseViewModel @Inject constructor(
                 addLog("[ERROR] (${res.executionTimeMs}ms) ${res.errorMessage} - $preview")
             }
             _isExecuting.value = false
-            loadTables(_selectedDatabase.value)
-            loadAllSchemas(_selectedDatabase.value)
+            loadDatabases()
+            if (_selectedDatabase.value.isNotBlank()) {
+                loadTables(_selectedDatabase.value)
+                loadAllSchemas(_selectedDatabase.value)
+            }
         }
     }
 
@@ -668,7 +707,21 @@ class DatabaseViewModel @Inject constructor(
                         _dbTerminalRunning.value = false
                         return@launch
                     }
-                    val res = databaseClient.executeQuery(_selectedEngine.value, _selectedDatabase.value, cmd)
+
+                    if (lower.startsWith("drop database ") || lower.startsWith("drop schema ")) {
+                        val droppedDb = cmd.split("\\s+".toRegex()).getOrNull(2)?.removeSuffix(";")?.removeSurrounding("`")?.removeSurrounding("'") ?: ""
+                        if (droppedDb.equals(_selectedDatabase.value, ignoreCase = true)) {
+                            _selectedDatabase.value = ""
+                            _selectedTable.value = null
+                            _tables.value = emptyList()
+                            _tableSchema.value = emptyList()
+                            _tableData.value = null
+                            _allTableSchemas.value = emptyList()
+                        }
+                    }
+
+                    val targetDb = if (lower.startsWith("drop database") || lower.startsWith("create database")) "" else _selectedDatabase.value
+                    val res = databaseClient.executeQuery(_selectedEngine.value, targetDb, cmd)
                     val output = if (res.isSuccess) {
                         if (res.columns.isNotEmpty()) {
                             formatAsciiTable(res.columns, res.rows, res.executionTimeMs)
@@ -680,8 +733,11 @@ class DatabaseViewModel @Inject constructor(
                     }
                     updateTerminalLine(targetIndex, cmd, output, !res.isSuccess)
                     if (res.isSuccess) {
-                        loadTables(_selectedDatabase.value)
-                        loadAllSchemas(_selectedDatabase.value)
+                        loadDatabases()
+                        if (_selectedDatabase.value.isNotBlank()) {
+                            loadTables(_selectedDatabase.value)
+                            loadAllSchemas(_selectedDatabase.value)
+                        }
                     }
                     _dbTerminalRunning.value = false
                 }
