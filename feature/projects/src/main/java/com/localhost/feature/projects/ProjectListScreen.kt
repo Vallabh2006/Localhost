@@ -14,6 +14,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.layout.WindowInsets
 
 import com.localhost.core.designsystem.theme.StatusGreen
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Cloud
+import com.localhost.core.model.TunnelStatus
+import com.localhost.core.designsystem.theme.IsDarkTheme
 import com.localhost.core.designsystem.theme.StatusRed
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -138,6 +142,11 @@ fun ProjectListScreen(
 
     var qrDialogUrl by remember { mutableStateOf<String?>(null) }
     var browserPreviewUrl by remember { mutableStateOf<String?>(null) }
+    val forwardingStatus by viewModel.forwardingStatus.collectAsState()
+    val forwardingActiveUrl by viewModel.forwardingActiveUrl.collectAsState()
+    val forwardedPort by viewModel.forwardedPort.collectAsState()
+    val tokenTunnelStatus by viewModel.tokenTunnelStatus.collectAsState()
+    val tokenActiveUrl by viewModel.tokenActiveUrl.collectAsState()
     var showNewProjectDialog by remember { mutableStateOf(false) }
     var newProjectSource by remember { mutableStateOf("EMPTY") }
     var searchQuery by remember { mutableStateOf("") }
@@ -208,28 +217,7 @@ fun ProjectListScreen(
                         }
                     }
                 },
-                actions = {
-                    IconButton(onClick = {
-                        newProjectSource = "GITHUB"
-                        showNewProjectDialog = true
-                    }) {
-                        Icon(
-                            Icons.Default.CloudDownload,
-                            contentDescription = "Import from GitHub",
-                            tint = PrimaryAccent
-                        )
-                    }
-                    IconButton(onClick = {
-                        newProjectSource = "ZIP"
-                        showNewProjectDialog = true
-                    }) {
-                        Icon(
-                            Icons.Default.DriveFolderUpload,
-                            contentDescription = "Import ZIP Project",
-                            tint = PrimaryAccent
-                        )
-                    }
-                },
+
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = DarkSurface,
                     titleContentColor = TextPrimary
@@ -322,8 +310,18 @@ fun ProjectListScreen(
                     }
 
                     items(filteredProjects, key = { it.id }) { project ->
+                        val isPortForwarded = forwardingStatus == TunnelStatus.CONNECTED &&
+                            forwardingActiveUrl.isNotBlank() &&
+                            (forwardedPort == project.port || (forwardedPort == null && project.status == ProjectStatus.RUNNING))
+
+                        val isTokenActive = tokenTunnelStatus == TunnelStatus.CONNECTED &&
+                            tokenActiveUrl.isNotBlank() &&
+                            project.status == ProjectStatus.RUNNING
+
                         ProjectCardItem(
                             project = project,
+                            portForwardUrl = if (isPortForwarded) forwardingActiveUrl else null,
+                            tokenTunnelUrl = if (isTokenActive) tokenActiveUrl else null,
                             onCardClick = { onProjectClick(project.id) },
                             onStartClick = { viewModel.startProject(project) },
                             onStopClick = { viewModel.stopProject(project.id) },
@@ -334,8 +332,13 @@ fun ProjectListScreen(
                             },
                             onOpenBrowser = {
                                 val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
-                                val url = "http://$ip:${project.port}"
+                                browserPreviewUrl = "http://$ip:${project.port}"
+                            },
+                            onOpenUrl = { url ->
                                 browserPreviewUrl = url
+                            },
+                            onShowQrUrl = { url ->
+                                qrDialogUrl = url
                             }
                         )
                     }
@@ -351,8 +354,18 @@ fun ProjectListScreen(
                     }
 
                     items(filteredProjects, key = { it.id }) { project ->
+                        val isPortForwarded = forwardingStatus == TunnelStatus.CONNECTED &&
+                            forwardingActiveUrl.isNotBlank() &&
+                            (forwardedPort == project.port || (forwardedPort == null && project.status == ProjectStatus.RUNNING))
+
+                        val isTokenActive = tokenTunnelStatus == TunnelStatus.CONNECTED &&
+                            tokenActiveUrl.isNotBlank() &&
+                            project.status == ProjectStatus.RUNNING
+
                         ProjectCardItem(
                             project = project,
+                            portForwardUrl = if (isPortForwarded) forwardingActiveUrl else null,
+                            tokenTunnelUrl = if (isTokenActive) tokenActiveUrl else null,
                             onCardClick = { onProjectClick(project.id) },
                             onStartClick = { viewModel.startProject(project) },
                             onStopClick = { viewModel.stopProject(project.id) },
@@ -363,8 +376,13 @@ fun ProjectListScreen(
                             },
                             onOpenBrowser = {
                                 val ip = NetworkUtils.getLocalIpAddress() ?: "127.0.0.1"
-                                val url = "http://$ip:${project.port}"
+                                browserPreviewUrl = "http://$ip:${project.port}"
+                            },
+                            onOpenUrl = { url ->
                                 browserPreviewUrl = url
+                            },
+                            onShowQrUrl = { url ->
+                                qrDialogUrl = url
                             }
                         )
                     }
@@ -377,9 +395,9 @@ fun ProjectListScreen(
         var step by remember { mutableIntStateOf(1) }
         var source by remember { mutableStateOf(newProjectSource) }
         var name by remember { mutableStateOf("") }
-        var portStr by remember { mutableStateOf("8000") }
+        var portStr by remember { mutableStateOf("8081") }
         var userChangedPort by remember { mutableStateOf(false) }
-        var selectedRuntime by remember { mutableStateOf(com.localhost.core.model.RuntimeType.PYTHON) }
+        var selectedRuntime by remember { mutableStateOf(com.localhost.core.model.RuntimeType.STATIC) }
         var githubUrl by remember { mutableStateOf("") }
         var selectedZipUri by remember { mutableStateOf<Uri?>(null) }
         var selectedZipName by remember { mutableStateOf<String?>(null) }
@@ -776,10 +794,17 @@ fun ProjectListScreen(
             onDismissRequest = { qrDialogUrl = null },
             containerColor = DarkSurfaceElevated,
             title = {
+                val dialogTitle = if (url.contains("trycloudflare.com")) {
+                    "Scan Port Forward URL"
+                } else if (url.contains("cloudflare") || url.startsWith("https://")) {
+                    "Scan Cloudflare Tunnel"
+                } else {
+                    "Scan to Open Local Server"
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.QrCode, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(22.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Scan to Open Local Server", fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(text = dialogTitle, fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             },
             text = {
@@ -919,12 +944,16 @@ private fun HeaderStatusRow(projectsCount: Int) {
 @Composable
 private fun ProjectCardItem(
     project: Project,
+    portForwardUrl: String? = null,
+    tokenTunnelUrl: String? = null,
     onCardClick: () -> Unit,
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
     onRestartClick: () -> Unit,
     onQrClick: () -> Unit,
-    onOpenBrowser: () -> Unit
+    onOpenBrowser: () -> Unit,
+    onOpenUrl: (String) -> Unit = {},
+    onShowQrUrl: (String) -> Unit = {}
 ) {
     val isRunning = project.status == ProjectStatus.RUNNING
     val borderColor = if (isRunning) PrimaryAccent.copy(alpha = 0.5f) else DarkBorder
@@ -1025,14 +1054,162 @@ private fun ProjectCardItem(
                         Button(
                             onClick = onStartClick,
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = StatusGreen.copy(alpha = 0.3f)),
-                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.8f)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (IsDarkTheme) StatusGreen.copy(alpha = 0.3f) else androidx.compose.ui.graphics.Color(0xFFD1FAE5)
+                            ),
+                            border = BorderStroke(1.dp, if (IsDarkTheme) StatusGreen.copy(alpha = 0.8f) else androidx.compose.ui.graphics.Color(0xFF059669)),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(44.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(20.dp))
+                            val greenTint = if (IsDarkTheme) StatusGreen else androidx.compose.ui.graphics.Color(0xFF047857)
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = greenTint, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Start Server", color = StatusGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text("Start Server", color = greenTint, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            if (portForwardUrl != null || tokenTunnelUrl != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (portForwardUrl != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = StatusGreen.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f).padding(end = 4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Public,
+                                        contentDescription = null,
+                                        tint = StatusGreen,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Column {
+                                        Text(
+                                            "Port Forward (Public)",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = StatusGreen
+                                        )
+                                        Text(
+                                            text = portForwardUrl,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp,
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = { onOpenUrl(portForwardUrl) },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.OpenInNew,
+                                            contentDescription = "Open in Browser",
+                                            tint = StatusGreen,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onShowQrUrl(portForwardUrl) },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.QrCode,
+                                            contentDescription = "QR Code",
+                                            tint = StatusGreen,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (tokenTunnelUrl != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = PrimaryAccent.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f).padding(end = 4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Cloud,
+                                        contentDescription = null,
+                                        tint = PrimaryAccent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Column {
+                                        Text(
+                                            "Cloudflare Tunnel",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = PrimaryAccent
+                                        )
+                                        Text(
+                                            text = tokenTunnelUrl,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp,
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = { onOpenUrl(tokenTunnelUrl) },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.OpenInNew,
+                                            contentDescription = "Open in Browser",
+                                            tint = PrimaryAccent,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onShowQrUrl(tokenTunnelUrl) },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.QrCode,
+                                            contentDescription = "QR Code",
+                                            tint = PrimaryAccent,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -51,8 +51,12 @@ class TunnelViewModel @Inject constructor(
         tunnelManager.stopPortForwarding()
     }
 
-    fun startNamedTunnel(token: String) {
-        tunnelManager.startNamedTunnel(token)
+    fun startNamedTunnel(token: String, domain: String? = null) {
+        tunnelManager.startNamedTunnel(token, domain = domain)
+    }
+
+    fun setNamedTunnelDomain(domain: String) {
+        tunnelManager.setNamedTunnelDomain(domain)
     }
 
     fun stopNamedTunnel() {

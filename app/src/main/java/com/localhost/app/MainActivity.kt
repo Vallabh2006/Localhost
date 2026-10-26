@@ -168,9 +168,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleShareIntent(intent)
-        try {
-            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        } catch (_: Exception) {}
+
         enableEdgeToEdge()
         try {
             val intent = Intent(this, SupervisorService::class.java)
@@ -188,6 +186,19 @@ class MainActivity : ComponentActivity() {
             val failHex by settingsRepository.failColorHex.collectAsState(initial = "#F43F5E")
             val warnHex by settingsRepository.warnColorHex.collectAsState(initial = "#F59E0B")
             val themeMode by settingsRepository.themeMode.collectAsState(initial = "DARK")
+
+            val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val isDark = when (themeMode.uppercase()) {
+                "LIGHT" -> false
+                "DARK" -> true
+                else -> isSystemDark
+            }
+
+            androidx.compose.runtime.SideEffect {
+                val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                insetsController.isAppearanceLightStatusBars = !isDark
+                insetsController.isAppearanceLightNavigationBars = !isDark
+            }
 
             LocalhostTheme(
                 accentName = accentName,
@@ -241,19 +252,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        try {
-            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        } catch (_: Exception) {}
-    }
 
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        super.onConfigurationChanged(newConfig)
-        try {
-            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        } catch (_: Exception) {}
-    }
 }
 
 @Composable

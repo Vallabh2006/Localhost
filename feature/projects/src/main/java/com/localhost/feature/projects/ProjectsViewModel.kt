@@ -1199,9 +1199,13 @@ class ProjectsViewModel @Inject constructor(
         _message.value = "Tunnel stopped"
     }
 
-    fun startNamedTunnel(token: String) {
-        tunnelManager.startNamedTunnel(token)
+    fun startNamedTunnel(token: String, domain: String? = null) {
+        tunnelManager.startNamedTunnel(token, domain = domain)
         _message.value = "Connecting Cloudflare Named Tunnel..."
+    }
+
+    fun setNamedTunnelDomain(domain: String) {
+        tunnelManager.setNamedTunnelDomain(domain)
     }
 
     fun stopNamedTunnel() {

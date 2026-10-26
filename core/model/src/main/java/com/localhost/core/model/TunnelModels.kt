@@ -28,7 +28,8 @@ data class SavedTunnelToken(
     val id: String,
     val name: String,
     val token: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val domain: String = ""
 )
 
 @Serializable

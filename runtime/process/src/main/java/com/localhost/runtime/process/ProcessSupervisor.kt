@@ -140,10 +140,13 @@ class ProcessSupervisor @Inject constructor(
                     } catch (_: Exception) {}
                 }
             },
-            isVpnBlocked = {
-                val vpnActive = NetworkUtils.isVpnActive(context)
+            isVpnBlocked = { clientIp ->
                 val disabled = vpnBlockedProjects[actualProject.id] ?: false
-                vpnActive && disabled
+                if (!disabled) {
+                    false
+                } else {
+                    NetworkUtils.isVpnActive(context) || NetworkUtils.isIpVpn(clientIp)
+                }
             },
             getVpnBlockedMessage = {
                 vpnBlockedMessages[actualProject.id] ?: "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer."

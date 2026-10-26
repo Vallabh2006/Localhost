@@ -86,3 +86,7 @@ var TextOnAccent = Color(0xFFFFFFFF)
 
 var CodeBackground = Color(0xFF0A0C10)
 var CodeBorder = Color(0xFF1E2230)
+
+var IsDarkTheme: Boolean = true
+val StartButtonColor: Color get() = if (IsDarkTheme) StatusGreen else Color(0xFF059669)
+val StartButtonTextColor: Color get() = if (IsDarkTheme) Color.Black else Color.White

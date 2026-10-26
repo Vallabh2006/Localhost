@@ -35,11 +35,13 @@ fun LocalhostTheme(
 ) {
     val isSystemDark = isSystemInDarkTheme()
     val isDark = when (themeMode.uppercase()) {
+
         "LIGHT" -> false
         "DARK" -> true
         else -> isSystemDark
     }
 
+    IsDarkTheme = isDark
     val primaryColor = remember(accentName) {
         val c = getAccentColor(accentName)
         PrimaryAccent = c

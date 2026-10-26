@@ -76,7 +76,7 @@ fun CreateProjectScreen(
     onProjectCreated: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    var selectedRuntime by remember { mutableStateOf(RuntimeType.PYTHON) }
+    var selectedRuntime by remember { mutableStateOf(RuntimeType.STATIC) }
     var portText by remember { mutableStateOf(selectedRuntime.defaultPort.toString()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isImportingZip by remember { mutableStateOf(false) }

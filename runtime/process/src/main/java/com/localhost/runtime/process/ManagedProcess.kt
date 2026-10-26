@@ -1,6 +1,7 @@
 package com.localhost.runtime.process
 
 import android.system.Os
+import android.util.Log
 import com.localhost.core.data.repository.LogRepository
 import com.localhost.core.model.LogStream
 import com.localhost.core.model.Project
@@ -20,7 +21,10 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
+import java.io.InputStream
 import java.io.InputStreamReader
+import java.io.OutputStream
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.text.SimpleDateFormat
@@ -41,7 +45,7 @@ class ManagedProcess(
     private val logRepository: LogRepository,
     private val scope: CoroutineScope,
     private val onRequestRecord: ((RequestRecord) -> Unit)? = null,
-    private val isVpnBlocked: (() -> Boolean)? = null,
+    private val isVpnBlocked: ((String) -> Boolean)? = null,
     private val getVpnBlockedMessage: (() -> String)? = null,
     private val onCrash: (ManagedProcess) -> Unit
 ) {
@@ -61,6 +65,9 @@ class ManagedProcess(
     @Volatile
     private var isExplicitlyStopped = false
     private var launchTimeMs = 0L
+    private var vpnProxyServerSocket: ServerSocket? = null
+    private var vpnProxyJob: Job? = null
+    private var internalPort: Int = 0
 
     fun start() {
         isExplicitlyStopped = false
@@ -75,6 +82,14 @@ class ManagedProcess(
         scope.launch(Dispatchers.IO) {
             try {
                 val workDir = File(project.workingDir).apply { mkdirs() }
+
+                val preferredPort = if (project.port <= 55535) project.port + 10000 else project.port - 10000
+                internalPort = try {
+                    ServerSocket(preferredPort).use { preferredPort }
+                } catch (_: Exception) {
+                    ServerSocket(0).use { it.localPort }
+                }
+                startVpnProxy(publicPort = project.port, backendPort = internalPort)
 
                 val commandParts = mutableListOf<String>()
                 if (project.runtime == RuntimeType.PHP && (project.startupCommand.isBlank() || project.startupCommand == "builtin")) {
@@ -177,13 +192,23 @@ class ManagedProcess(
                     finalCommand.addAll(commandParts.map { it.trim() }.filter { it.isNotBlank() })
                 }
 
-                val processBuilder = ProcessBuilder(finalCommand)
+                val mappedCommand = finalCommand.map { part ->
+                    when {
+                        part == project.port.toString() -> internalPort.toString()
+                        part.contains(":${project.port}") -> part.replace(":${project.port}", ":$internalPort")
+                        part.contains("=${project.port}") -> part.replace("=${project.port}", "=$internalPort")
+                        else -> part
+                    }
+                }
+                val processBuilder = ProcessBuilder(mappedCommand)
                 processBuilder.directory(workDir)
 
                 val tmpDir = File(workDir, ".tmp").apply { mkdirs() }
                 val env = processBuilder.environment()
                 env.putAll(runtimeEnv)
-                env["PORT"] = project.port.toString()
+                env["PORT"] = internalPort.toString()
+                env["INTERNAL_PORT"] = internalPort.toString()
+                env["PUBLIC_PORT"] = project.port.toString()
                 env["HOST"] = "0.0.0.0"
                 env["HOME"] = workDir.absolutePath
                 env["TMPDIR"] = tmpDir.absolutePath
@@ -272,6 +297,7 @@ class ManagedProcess(
                         env[ev.key] = ev.value
                     }
                 }
+                env["PORT"] = internalPort.toString()
 
                 val proc = processBuilder.start()
                 process = proc
@@ -345,6 +371,11 @@ class ManagedProcess(
                     stderrJob?.cancel()
 
                     if (isExplicitlyStopped) {
+                        try {
+                            vpnProxyServerSocket?.close()
+                            vpnProxyServerSocket = null
+                        } catch (_: Exception) {}
+                        vpnProxyJob?.cancel()
                         _status.value = ProjectStatus.STOPPED
                         logRepository.append(project.id, LogStream.SYSTEM, "Process stopped explicitly")
                         return@launch
@@ -373,6 +404,11 @@ class ManagedProcess(
                             start()
                         }
                     } else {
+                        try {
+                            vpnProxyServerSocket?.close()
+                            vpnProxyServerSocket = null
+                        } catch (_: Exception) {}
+                        vpnProxyJob?.cancel()
                         if (exitCode != 0) {
                             _status.value = ProjectStatus.CRASHED
                             onCrash(this@ManagedProcess)
@@ -460,8 +496,29 @@ class ManagedProcess(
             val pathWithQuery = parts[1]
             val path = pathWithQuery.substringBefore("?")
 
-            if (isVpnBlocked?.invoke() == true) {
-                val clientIp = socket.inetAddress?.hostAddress ?: "127.0.0.1"
+            var cfConnectingIp: String? = null
+            var xForwardedFor: String? = null
+            var xRealIp: String? = null
+            var contentLength = 0
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                if (line!!.isEmpty()) break
+                val lower = line!!.lowercase()
+                if (lower.startsWith("cf-connecting-ip:")) {
+                    cfConnectingIp = line!!.substringAfter(":").trim()
+                } else if (lower.startsWith("x-forwarded-for:")) {
+                    xForwardedFor = line!!.substringAfter(":").trim().split(",").firstOrNull()?.trim()
+                } else if (lower.startsWith("x-real-ip:")) {
+                    xRealIp = line!!.substringAfter(":").trim()
+                } else if (lower.startsWith("content-length:")) {
+                    contentLength = line!!.substringAfter(":").trim().toIntOrNull() ?: 0
+                }
+            }
+
+            val clientIp = cfConnectingIp ?: xForwardedFor ?: xRealIp ?: socket.inetAddress?.hostAddress ?: "127.0.0.1"
+
+            if (isVpnBlocked?.invoke(clientIp) == true) {
+                Log.d("VpnProxy", "[$clientIp] 403 Forbidden (builtin) - VPN Detected on project ${project.name}")
                 val errorCode = "ERR_VPN_403_" + String.format(Locale.US, "%06X", (System.currentTimeMillis() % 0xFFFFFF))
                 val customMsg = getVpnBlockedMessage?.invoke() ?: "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer."
 
@@ -489,15 +546,6 @@ class ManagedProcess(
                 output.flush()
                 onRequestRecord?.invoke(RequestRecord(projectId = project.id, timestamp = System.currentTimeMillis(), method = method, path = path, statusCode = 403, responseBytes = blockedBytes.size.toLong(), durationMs = 1L, errorMessage = "$errorCode [$clientIp] VPN Blocked"))
                 return
-            }
-
-            var contentLength = 0
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                if (line!!.isEmpty()) break
-                if (line!!.lowercase().startsWith("content-length:")) {
-                    contentLength = line!!.substringAfter(":").trim().toIntOrNull() ?: 0
-                }
             }
 
             val body = if (contentLength > 0) {
@@ -814,10 +862,216 @@ class ManagedProcess(
         return result
     }
 
+    private fun startVpnProxy(publicPort: Int, backendPort: Int) {
+        vpnProxyJob?.cancel()
+        try {
+            vpnProxyServerSocket?.close()
+            vpnProxyServerSocket = null
+        } catch (_: Exception) {}
+
+        vpnProxyJob = scope.launch(Dispatchers.IO) {
+            val server: ServerSocket
+            try {
+                server = ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(publicPort))
+                }
+                vpnProxyServerSocket = server
+                Log.d("VpnProxy", "VPN proxy listening on public port $publicPort -> backend port $backendPort for ${project.name}")
+            } catch (e: Exception) {
+                Log.e("VpnProxy", "Failed to bind VPN proxy to port $publicPort for ${project.name}: ${e.message}")
+                logRepository.append(project.id, LogStream.SYSTEM, "Port $publicPort unavailable: ${e.message}")
+                _status.value = ProjectStatus.CRASHED
+                return@launch
+            }
+
+            while (isActive && !server.isClosed) {
+                try {
+                    val client = server.accept()
+                    launch(Dispatchers.IO) {
+                        handleProxyClient(client, publicPort, backendPort)
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+        }
+    }
+
+    private suspend fun CoroutineScope.handleProxyClient(client: Socket, publicPort: Int, backendPort: Int) {
+        val headerBuffer = java.io.ByteArrayOutputStream()
+        val inStream = client.getInputStream()
+        val maxHeaderSize = 16384
+        client.soTimeout = 3000
+        try {
+            while (headerBuffer.size() < maxHeaderSize) {
+                val b = inStream.read()
+                if (b == -1) break
+                headerBuffer.write(b)
+                val bytes = headerBuffer.toByteArray()
+                val len = bytes.size
+                if (len >= 4 && bytes[len - 4] == 13.toByte() && bytes[len - 3] == 10.toByte() && bytes[len - 2] == 13.toByte() && bytes[len - 1] == 10.toByte()) {
+                    break
+                }
+            }
+        } catch (_: Exception) {}
+
+        if (headerBuffer.size() == 0) {
+            try { client.close() } catch (_: Exception) {}
+            return
+        }
+
+        val headerBytes = headerBuffer.toByteArray()
+        val headerText = String(headerBytes, Charsets.ISO_8859_1)
+        val lines = headerText.lines()
+        val requestLine = lines.firstOrNull() ?: ""
+        var method = "GET"
+        var path = "/"
+        val parts = requestLine.split(" ")
+        if (parts.size >= 2) {
+            method = parts[0]
+            path = parts[1].substringBefore("?")
+        }
+
+        var cfConnectingIp: String? = null
+        var xForwardedFor: String? = null
+        var xRealIp: String? = null
+
+        for (line in lines.drop(1)) {
+            val colonIdx = line.indexOf(':')
+            if (colonIdx > 0) {
+                val name = line.substring(0, colonIdx).trim().lowercase()
+                val value = line.substring(colonIdx + 1).trim()
+                when (name) {
+                    "cf-connecting-ip" -> cfConnectingIp = value
+                    "x-forwarded-for" -> xForwardedFor = value.split(",").firstOrNull()?.trim()
+                    "x-real-ip" -> xRealIp = value
+                }
+            }
+        }
+
+        val visitorIp = cfConnectingIp ?: xForwardedFor ?: xRealIp ?: client.inetAddress?.hostAddress ?: "127.0.0.1"
+        val blocked = isVpnBlocked?.invoke(visitorIp) == true
+        Log.d("VpnProxy", "Incoming connection from $visitorIp (socket: ${client.inetAddress?.hostAddress}) on port $publicPort for ${project.name}. isVpnBlocked=$blocked")
+
+        if (blocked) {
+            val errorCode = "ERR_VPN_403_" + String.format(Locale.US, "%06X", (System.currentTimeMillis() % 0xFFFFFF))
+            val customMsg = getVpnBlockedMessage?.invoke() ?: "VPN Detected, Please turn it off. If you think it is a mistake, contact the Developer."
+
+            Log.d("VpnProxy", "[$visitorIp] 403 Forbidden - VPN Detected ($errorCode) on project ${project.name}")
+
+            scope.launch(Dispatchers.IO) {
+                try {
+                    logRepository.append(project.id, LogStream.STDERR, "[$visitorIp] 403 Forbidden - VPN Detected ($errorCode). Access blocked.")
+                } catch (_: Exception) {}
+            }
+
+            val html = renderVpnBlockedPage(
+                projectName = project.name,
+                port = publicPort,
+                clientIp = visitorIp,
+                errorCode = errorCode,
+                errorMessage = customMsg
+            )
+            val blockedBytes = html.toByteArray(Charsets.UTF_8)
+            val resp = "HTTP/1.1 403 Forbidden\r\n" +
+                    "Content-Type: text/html; charset=utf-8\r\n" +
+                    "Content-Length: ${blockedBytes.size}\r\n" +
+                    "Access-Control-Allow-Origin: *\r\n" +
+                    "Connection: close\r\n\r\n"
+            try {
+                val output = client.getOutputStream()
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.write(blockedBytes)
+                output.flush()
+            } catch (_: Exception) {}
+            onRequestRecord?.invoke(RequestRecord(projectId = project.id, timestamp = System.currentTimeMillis(), method = method, path = path, statusCode = 403, responseBytes = blockedBytes.size.toLong(), durationMs = 1L, errorMessage = "$errorCode [$visitorIp] VPN Blocked"))
+            try { client.close() } catch (_: Exception) {}
+            return
+        }
+
+        var backend: Socket? = null
+        for (attempt in 1..25) {
+            try {
+                backend = Socket("127.0.0.1", backendPort)
+                break
+            } catch (_: Exception) {
+                if (!isActive || isExplicitlyStopped) break
+                delay(200)
+            }
+        }
+
+        if (backend == null) {
+            Log.e("VpnProxy", "Could not connect to backend at 127.0.0.1:$backendPort for ${project.name}")
+            try {
+                val resp = "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nService Unavailable\r\n"
+                client.getOutputStream().write(resp.toByteArray(Charsets.UTF_8))
+                client.getOutputStream().flush()
+            } catch (_: Exception) {}
+            try { client.close() } catch (_: Exception) {}
+            return
+        }
+
+        try {
+            client.soTimeout = 0
+            client.tcpNoDelay = true
+            backend.tcpNoDelay = true
+
+            // Send buffered header bytes to backend first!
+            backend.getOutputStream().write(headerBytes)
+            backend.getOutputStream().flush()
+
+            val job1 = launch(Dispatchers.IO) {
+                try {
+                    relay(client.getInputStream(), backend.getOutputStream())
+                } catch (_: Exception) {
+                    try { backend.close() } catch (_: Exception) {}
+                } finally {
+                    try { backend.shutdownOutput() } catch (_: Exception) {}
+                }
+            }
+
+            val job2 = launch(Dispatchers.IO) {
+                try {
+                    relay(backend.getInputStream(), client.getOutputStream())
+                } catch (_: Exception) {
+                    try { client.close() } catch (_: Exception) {}
+                } finally {
+                    try { client.shutdownOutput() } catch (_: Exception) {}
+                    try { client.close() } catch (_: Exception) {}
+                }
+            }
+
+            job1.join()
+            job2.join()
+        } catch (_: Exception) {
+        } finally {
+            try { client.close() } catch (_: Exception) {}
+            try { backend.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun relay(input: InputStream, output: OutputStream) {
+        val buffer = ByteArray(16384)
+        while (true) {
+            val bytesRead = input.read(buffer)
+            if (bytesRead == -1) break
+            output.write(buffer, 0, bytesRead)
+            output.flush()
+        }
+    }
+
     suspend fun stop() = withContext(Dispatchers.IO) {
         isExplicitlyStopped = true
         _status.value = ProjectStatus.STOPPING
         monitorJob?.cancel()
+
+        try {
+            vpnProxyServerSocket?.close()
+            vpnProxyServerSocket = null
+        } catch (_: Exception) {}
+        vpnProxyJob?.cancel()
+        Log.d("VpnProxy", "Stopped VPN proxy for ${project.name}")
 
         try {
             staticServerSocket?.close()

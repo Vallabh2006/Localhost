@@ -825,7 +825,7 @@ private fun AboutSection() {
                     color = PrimaryAccentContainer,
                     border = BorderStroke(1.dp, PrimaryAccent)
                 ) {
-                    Text("v1.0.5", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    Text("v1.0.6", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
             }
 
@@ -899,7 +899,7 @@ private fun AboutSection() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Latest Changes in v1.0.5", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                Text("Latest Changes in v1.0.6", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
                 Icon(
                     if (showChangelog) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
@@ -917,12 +917,12 @@ private fun AboutSection() {
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val changelogItems = listOf(
-                            "Interactive Database CLI Terminal: Full-featured MariaDB terminal tab with monospace ASCII grid-table formatting (+----+----+), command history navigation (↑/↓), quick SQL accessory keys, and click-to-copy results.",
-                            "Database Controls & Settings Redesign: Aligned database dashboard cards with project control UI featuring 16.dp rounded surfaces, status chip badges, large process buttons, and telemetry stat tiles.",
-                            "Database Explorer & Visualizer Auto-Refresh & 1-Tap Recovery: Instant schema and table auto-refresh on tab switch with persistent Refresh buttons and 1-tap 'Start Service' recovery banners when MariaDB is stopped.",
-                            "MariaDB Service Health & Stale Socket Fix: Dispatched TCP 127.0.0.1:3306 health checks to IO background threads, purged stale socket files on start/stop, and added seamless Unix socket to TCP fallback.",
-                            "Starter Database Auto-Seeding: Automatically seeds cats_db with sample relational tables (owners, cats) and foreign keys on first boot for instant ER diagram visualization.",
-                            "Symlink-Aware Project Deletion: Fixed recursive deletion of broken symlinks in Python virtual environments (.venv/bin/) to prevent deleted projects from resurrecting as Static HTML entities."
+                            "Automatic Named Tunnel Route Discovery: Automatically extracts public routes and hostnames from Cloudflare Edge ingress logs without requiring manual domain configuration.",
+                            "Optional Route Parameter: Updated public hostname configuration field and dialog across Settings and Dashboard to 'Enter Route (Optional)'.",
+                            "Dashboard Forwarding QR & Direct Action Bar: Fixed QR code popup dialog on port forwards in portrait orientation, and redesigned action controls (Copy, QR, Open) with dedicated full-width buttons to prevent text clipping.",
+                            "Settings Tab Streamlining: Removed duplicate forward actions from project settings tab, consolidating all quick-access actions (Copy, QR, Open) on the Project Dashboard.",
+                            "Stack Selection & Top Bar Clean-up: Reordered runtime presets in project creation (Static HTML/JS, PHP, Node.js, Java, Python) and removed redundant top-bar import buttons.",
+                            "Light Theme Visibility: Enhanced navigation bar and action button contrast across Project Settings and Database controls in light mode."
                         )
                         changelogItems.forEach { item ->
                             Row(

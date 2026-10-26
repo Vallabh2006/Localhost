@@ -120,6 +120,8 @@ import com.localhost.core.designsystem.theme.DarkSurface
 import com.localhost.core.designsystem.theme.DarkSurfaceElevated
 import com.localhost.core.designsystem.theme.PrimaryAccent
 import com.localhost.core.designsystem.theme.PrimaryAccentContainer
+import com.localhost.core.designsystem.theme.StartButtonColor
+import com.localhost.core.designsystem.theme.StartButtonTextColor
 import com.localhost.core.designsystem.theme.StatusGreen
 import com.localhost.core.designsystem.theme.StatusOrange
 import com.localhost.core.designsystem.theme.StatusRed
@@ -690,13 +692,13 @@ private fun DatabaseDashboardTab(
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             onStart()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        colors = ButtonDefaults.buttonColors(containerColor = StartButtonColor),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth().height(46.dp)
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = StartButtonTextColor, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start Service", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Start Service", color = StartButtonTextColor, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1037,12 +1039,12 @@ private fun ExplorerTab(
                     }
                     Button(
                         onClick = onStartService,
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        colors = ButtonDefaults.buttonColors(containerColor = StartButtonColor),
                         shape = RoundedCornerShape(6.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
-                        Text("Start Service", color = androidx.compose.ui.graphics.Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        Text("Start Service", color = StartButtonTextColor, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
                 }
             }
@@ -1343,12 +1345,12 @@ private fun VisualizeTab(
                     )
                     Button(
                         onClick = onStartService,
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        colors = ButtonDefaults.buttonColors(containerColor = StartButtonColor),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                         modifier = Modifier.height(32.dp)
                     ) {
-                        Text("Start Service", color = androidx.compose.ui.graphics.Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("Start Service", color = StartButtonTextColor, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             }
@@ -2100,12 +2102,12 @@ private fun DatabaseCliTerminalTab(
                     }
                     Button(
                         onClick = onStartService,
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        colors = ButtonDefaults.buttonColors(containerColor = StartButtonColor),
                         shape = RoundedCornerShape(6.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                         modifier = Modifier.height(26.dp)
                     ) {
-                        Text("Start Service", color = androidx.compose.ui.graphics.Color.Black, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        Text("Start Service", color = StartButtonTextColor, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
                 }
             }

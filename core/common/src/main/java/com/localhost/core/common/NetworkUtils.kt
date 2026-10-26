@@ -53,6 +53,63 @@ object NetworkUtils {
         return null
     }
 
+    private val vpnCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Long>>()
+    private const val CACHE_TTL_MS = 30 * 60 * 1000L // 30 minutes
+
+    fun isIpVpn(ip: String?): Boolean {
+        if (ip.isNullOrBlank()) return false
+        val cleanIp = ip.trim().removeSurrounding("[", "]").substringBeforeLast("%")
+        val targetIp = if (cleanIp.contains(":") && !cleanIp.contains("::") && cleanIp.count { it == ':' } == 1) {
+            cleanIp.substringBefore(":")
+        } else {
+            cleanIp
+        }
+
+        if (targetIp.isEmpty() ||
+            targetIp == "127.0.0.1" ||
+            targetIp == "localhost" ||
+            targetIp == "::1" ||
+            targetIp.startsWith("10.") ||
+            targetIp.startsWith("192.168.") ||
+            ((16..31).any { targetIp.startsWith("172.$it.") }) ||
+            targetIp.startsWith("fc00:") ||
+            targetIp.startsWith("fe80:")
+        ) {
+            return false
+        }
+
+        val now = System.currentTimeMillis()
+        val cached = vpnCache[targetIp]
+        if (cached != null && (now - cached.second) < CACHE_TTL_MS) {
+            return cached.first
+        }
+
+        return try {
+            val url = java.net.URL("http://ip-api.com/json/$targetIp?fields=status,message,proxy,hosting")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "Localhost-Mobile-VPS")
+
+            if (conn.responseCode == 200) {
+                val respText = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = org.json.JSONObject(respText)
+                val isProxy = json.optBoolean("proxy", false)
+                val isHosting = json.optBoolean("hosting", false)
+                val isVpn = isProxy || isHosting
+                vpnCache[targetIp] = Pair(isVpn, now)
+                android.util.Log.d("VpnProxy", "VPN check for $targetIp: proxy=$isProxy, hosting=$isHosting => isVpn=$isVpn")
+                isVpn
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VpnProxy", "Failed to check VPN for $targetIp: ${e.message}")
+            false
+        }
+    }
+
     fun isVpnActive(context: Context): Boolean {
         try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager

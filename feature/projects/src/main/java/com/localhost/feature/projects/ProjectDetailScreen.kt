@@ -118,6 +118,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
@@ -171,6 +173,8 @@ import com.localhost.core.designsystem.theme.DarkSurface
 import com.localhost.core.designsystem.theme.DarkSurfaceElevated
 import com.localhost.core.designsystem.theme.PrimaryAccent
 import com.localhost.core.designsystem.theme.PrimaryAccentContainer
+import com.localhost.core.designsystem.theme.StartButtonColor
+import com.localhost.core.designsystem.theme.StartButtonTextColor
 import com.localhost.core.designsystem.theme.StatusGreen
 import com.localhost.core.designsystem.theme.StatusOrange
 import com.localhost.core.designsystem.theme.StatusRed
@@ -203,6 +207,10 @@ fun ProjectDetailScreen(
     val tunnelStatus by viewModel.tunnelStatus.collectAsState()
     val activeTunnelUrl by viewModel.activeTunnelUrl.collectAsState()
     val tunnelError by viewModel.tunnelError.collectAsState()
+    val forwardingStatus by viewModel.forwardingStatus.collectAsState()
+    val forwardingActiveUrl by viewModel.forwardingActiveUrl.collectAsState()
+    val tokenTunnelStatus by viewModel.tokenTunnelStatus.collectAsState()
+    val tokenActiveUrl by viewModel.tokenActiveUrl.collectAsState()
     val project = projects.firstOrNull { it.id == projectId }
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -439,7 +447,7 @@ fun ProjectDetailScreen(
                             )
                             if (project.status == ProjectStatus.RUNNING) {
                                 DropdownMenuItem(
-                                    text = { Text("QR Code & Link", color = TextPrimary) },
+                                    text = { Text("Local QR Code & Link", color = TextPrimary) },
                                     leadingIcon = { Icon(Icons.Default.QrCode, contentDescription = null, tint = PrimaryAccent) },
                                     onClick = {
                                         showDetailMenu = false
@@ -448,14 +456,26 @@ fun ProjectDetailScreen(
                                     }
                                 )
                             }
-                            DropdownMenuItem(
-                                text = { Text("Files Explorer", color = TextPrimary) },
-                                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, tint = TextSecondary) },
-                                onClick = {
-                                    showDetailMenu = false
-                                    onOpenFiles(project.id)
-                                }
-                            )
+                            if (forwardingStatus == TunnelStatus.CONNECTED && forwardingActiveUrl.isNotBlank()) {
+                                DropdownMenuItem(
+                                    text = { Text("Port Forward QR & Link", color = TextPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.QrCode, contentDescription = null, tint = StatusGreen) },
+                                    onClick = {
+                                        showDetailMenu = false
+                                        qrDialogUrl = forwardingActiveUrl
+                                    }
+                                )
+                            }
+                            if (tokenTunnelStatus == TunnelStatus.CONNECTED && tokenActiveUrl.isNotBlank()) {
+                                DropdownMenuItem(
+                                    text = { Text("Cloudflare Tunnel QR & Link", color = TextPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.QrCode, contentDescription = null, tint = StatusGreen) },
+                                    onClick = {
+                                        showDetailMenu = false
+                                        qrDialogUrl = tokenActiveUrl
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Delete Project", color = StatusRed) },
                                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = StatusRed) },
@@ -500,7 +520,8 @@ fun ProjectDetailScreen(
                         onOpenLogs = onOpenLogs,
                         onOpenFiles = onOpenFiles,
                         onExportZip = { shareExportedZip() },
-                        onOpenBrowser = { browserPreviewUrl = it }
+                        onOpenBrowser = { browserPreviewUrl = it },
+                        onShowQr = { qrDialogUrl = it }
                     )
                 }
 
@@ -568,14 +589,15 @@ fun ProjectDetailScreen(
                                 },
                                 onOpenFiles = onOpenFiles,
                                 onExportZip = { shareExportedZip() },
-                                onOpenBrowser = { browserPreviewUrl = it }
+                                onOpenBrowser = { browserPreviewUrl = it },
+                                onShowQr = { qrDialogUrl = it }
                             )
                             1 -> ConfigurationsTab(project = project, viewModel = viewModel)
                             2 -> ProjectTerminalTab(project = project, viewModel = viewModel)
                             3 -> ProjectLiveLogsView(project = project, viewModel = viewModel)
                             4 -> VersionsTab(project = project, viewModel = viewModel)
                             5 -> AnalyticsTab(project = project, viewModel = viewModel)
-                            6 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                            6 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick, onShowQr = { qrDialogUrl = it })
                         }
                     }
                 }
@@ -639,14 +661,15 @@ fun ProjectDetailScreen(
                             },
                             onOpenFiles = onOpenFiles,
                             onExportZip = { shareExportedZip() },
-                            onOpenBrowser = { browserPreviewUrl = it }
+                            onOpenBrowser = { browserPreviewUrl = it },
+                            onShowQr = { qrDialogUrl = it }
                         )
                     1 -> ConfigurationsTab(project = project, viewModel = viewModel)
                     2 -> ProjectTerminalTab(project = project, viewModel = viewModel)
                     3 -> ProjectLiveLogsView(project = project, viewModel = viewModel)
                     4 -> VersionsTab(project = project, viewModel = viewModel)
                     5 -> AnalyticsTab(project = project, viewModel = viewModel)
-                    6 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick)
+                    6 -> ControlTab(project = project, viewModel = viewModel, onBackClick = onBackClick, onShowQr = { qrDialogUrl = it })
                 }
             }
         }
@@ -749,10 +772,17 @@ fun ProjectDetailScreen(
             onDismissRequest = { qrDialogUrl = null },
             containerColor = DarkSurfaceElevated,
             title = {
+                val dialogTitle = if (url.contains("trycloudflare.com")) {
+                    "Scan Port Forward URL"
+                } else if (url.contains("cloudflare") || url.startsWith("https://")) {
+                    "Scan Cloudflare Tunnel"
+                } else {
+                    "Scan to Open Local Server"
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.QrCode, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(22.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scan to Open Local Server", fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(dialogTitle, fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
             },
             text = {
@@ -877,7 +907,8 @@ private fun OverviewTab(
     onOpenLogs: (String) -> Unit,
     onOpenFiles: (String) -> Unit,
     onExportZip: () -> Unit,
-    onOpenBrowser: (String) -> Unit
+    onOpenBrowser: (String) -> Unit,
+    onShowQr: (String) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -900,7 +931,8 @@ private fun OverviewTab(
             onOpenLogs = onOpenLogs,
             onOpenFiles = onOpenFiles,
             onExportZip = onExportZip,
-            onOpenBrowser = onOpenBrowser
+            onOpenBrowser = onOpenBrowser,
+            onShowQr = onShowQr
         )
     }
 }
@@ -920,14 +952,19 @@ private fun OverviewTabContent(
     onOpenLogs: (String) -> Unit,
     onOpenFiles: (String) -> Unit,
     onExportZip: () -> Unit,
-    onOpenBrowser: (String) -> Unit
+    onOpenBrowser: (String) -> Unit,
+    onShowQr: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
+    val tokenTunnelStatus by viewModel.tokenTunnelStatus.collectAsState()
+    val tokenActiveUrl by viewModel.tokenActiveUrl.collectAsState()
     val localIp = remember(project.id) { NetworkUtils.getLocalIpAddress() ?: "127.0.0.1" }
     val lanUrl = "http://$localIp:${project.port}"
     val loopbackUrl = "http://127.0.0.1:${project.port}"
     var showFullQrModal by remember { mutableStateOf(false) }
+    var showSetDomainDialog by remember { mutableStateOf(false) }
+    var domainInput by remember { mutableStateOf("") }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -1044,12 +1081,13 @@ private fun OverviewTabContent(
 
     if (activeTunnelUrl.isNotBlank() || tunnelStatus == com.localhost.core.model.TunnelStatus.CONNECTED) {
         val displayUrl = if (activeTunnelUrl.isNotBlank()) activeTunnelUrl else "https://tunnel.localhost"
+        val pfQrBitmap = remember(displayUrl) { QrCodeGenerator.generate(displayUrl, 400) }
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
             border = BorderStroke(1.5.dp, StatusGreen.copy(alpha = 0.6f))
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1085,48 +1123,364 @@ private fun OverviewTabContent(
                 }
 
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = DarkSurfaceElevated,
-                    border = BorderStroke(1.dp, DarkBorderSubtle)
+                    border = BorderStroke(1.dp, DarkBorderSubtle),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(
-                            text = displayUrl,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            color = PrimaryAccent,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.White,
+                                onClick = { onShowQr(displayUrl) },
+                                modifier = Modifier.size(76.dp)
+                            ) {
+                                pfQrBitmap?.let { bmp ->
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Port Forward QR Code",
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(4.dp)
+                                    )
+                                }
+                            }
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    "Worldwide Public Access",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = displayUrl,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = StatusGreen,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
                                 onClick = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     val clip = ClipData.newPlainText("Tunnel URL", displayUrl)
                                     clipboard.setPrimaryClip(clip)
                                     Toast.makeText(context, "Copied Tunnel URL", Toast.LENGTH_SHORT).show()
                                 },
-                                modifier = Modifier.size(32.dp)
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, DarkBorder),
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                             ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Copy", fontSize = 12.sp, color = TextPrimary)
                             }
-                            IconButton(
-                                onClick = { onOpenBrowser(displayUrl) },
-                                modifier = Modifier.size(32.dp)
+                            OutlinedButton(
+                                onClick = { onShowQr(displayUrl) },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, DarkBorder),
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                             ) {
-                                Icon(Icons.Default.OpenInBrowser, contentDescription = "Open", tint = TextPrimary, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.QrCode, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("QR", fontSize = 12.sp, color = StatusGreen)
+                            }
+                            Button(
+                                onClick = { onOpenBrowser(displayUrl) },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                            ) {
+                                Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Open", fontSize = 12.sp, color = TextOnAccent)
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (tokenTunnelStatus == com.localhost.core.model.TunnelStatus.CONNECTED || tokenActiveUrl.isNotBlank()) {
+        val hasDomain = tokenActiveUrl.isNotBlank()
+        val displayTokenUrl = if (hasDomain) tokenActiveUrl else ""
+        val tokenQrBitmap = remember(displayTokenUrl) { if (hasDomain) QrCodeGenerator.generate(displayTokenUrl, 400) else null }
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = BorderStroke(1.5.dp, PrimaryAccent.copy(alpha = 0.6f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(PrimaryAccent)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Cloudflare Tunnel Active",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = PrimaryAccent
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = PrimaryAccent.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            "Named Tunnel",
+                            color = PrimaryAccent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DarkSurfaceElevated,
+                    border = BorderStroke(1.dp, DarkBorderSubtle),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (hasDomain) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color.White,
+                                    onClick = { onShowQr(displayTokenUrl) },
+                                    modifier = Modifier.size(76.dp)
+                                ) {
+                                    tokenQrBitmap?.let { bmp ->
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "Cloudflare Tunnel QR Code",
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(4.dp)
+                                        )
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "Custom Domain Access",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = TextPrimary
+                                        )
+                                        IconButton(
+                                            onClick = {
+                                                domainInput = displayTokenUrl.removePrefix("https://").removePrefix("http://")
+                                                showSetDomainDialog = true
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit Domain", tint = TextMuted, modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                    Text(
+                                        text = displayTokenUrl,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = PrimaryAccent,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("Tunnel URL", displayTokenUrl)
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Copied Tunnel URL", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, DarkBorder),
+                                    modifier = Modifier.weight(1f).height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Copy", fontSize = 12.sp, color = TextPrimary)
+                                }
+                                OutlinedButton(
+                                    onClick = { onShowQr(displayTokenUrl) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, DarkBorder),
+                                    modifier = Modifier.weight(1f).height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Icon(Icons.Default.QrCode, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("QR", fontSize = 12.sp, color = PrimaryAccent)
+                                }
+                                Button(
+                                    onClick = { onOpenBrowser(displayTokenUrl) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                                    modifier = Modifier.weight(1f).height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Open", fontSize = 12.sp, color = TextOnAccent)
+                                }
+                            }
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Route Not Set",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = TextPrimary
+                            )
+                            Text(
+                                "Tunnel is connected to Cloudflare Edge. Enter your route if needed to show QR code and enable direct preview.",
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                lineHeight = 16.sp
+                            )
+                            Button(
+                                onClick = {
+                                    domainInput = ""
+                                    showSetDomainDialog = true
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                                modifier = Modifier.fillMaxWidth().height(38.dp)
+                            ) {
+                                Icon(Icons.Default.Language, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Enter Route (Optional)", color = TextOnAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showSetDomainDialog) {
+        AlertDialog(
+            onDismissRequest = { showSetDomainDialog = false },
+            containerColor = DarkSurfaceElevated,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Language, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Enter Route (Optional)", fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Enter the route/domain configured for this tunnel (e.g. app.yourdomain.com):",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                    OutlinedTextField(
+                        value = domainInput,
+                        onValueChange = { domainInput = it },
+                        placeholder = { Text("app.yourdomain.com", color = TextMuted, fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = domainInput.trim()
+                        if (trimmed.isNotBlank()) {
+                            viewModel.setNamedTunnelDomain(trimmed)
+                        }
+                        showSetDomainDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Save", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSetDomainDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
     }
 
 
@@ -2404,12 +2758,14 @@ private fun ConfigurationsTab(
 private fun ControlTab(
     project: Project,
     viewModel: ProjectsViewModel,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onShowQr: (String) -> Unit = {}
 ) {
     val forwardingStatus by viewModel.forwardingStatus.collectAsState()
     val forwardingActiveUrl by viewModel.forwardingActiveUrl.collectAsState()
     val forwardingError by viewModel.forwardingError.collectAsState()
     val tokenTunnelStatus by viewModel.tokenTunnelStatus.collectAsState()
+    val tokenActiveUrl by viewModel.tokenActiveUrl.collectAsState()
     val tokenError by viewModel.tokenError.collectAsState()
     val savedTunnelTokens by viewModel.savedTunnelTokens.collectAsState()
     val vpnDisabled by viewModel.isVpnDisabled(project.id).collectAsState(initial = false)
@@ -2420,6 +2776,7 @@ private fun ControlTab(
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var namedTokenInput by remember { mutableStateOf("") }
+    var namedDomainInput by remember { mutableStateOf("") }
 
     var showForwardPortDialog by remember { mutableStateOf(false) }
     var forwardPortInput by remember(project.port) { mutableStateOf(project.port.toString()) }
@@ -2498,13 +2855,13 @@ private fun ControlTab(
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.startProject(project)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
+                        colors = ButtonDefaults.buttonColors(containerColor = StartButtonColor),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth().height(46.dp)
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = StartButtonTextColor, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start Server", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Start Server", color = StartButtonTextColor, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2583,44 +2940,7 @@ private fun ControlTab(
                                 )
                             }
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                        val clip = android.content.ClipData.newPlainText("Forwarded URL", forwardingActiveUrl)
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Copied Worldwide HTTPS link", Toast.LENGTH_SHORT).show()
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(1.dp, DarkBorder),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Default.Share, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Copy", fontSize = 12.sp, color = TextPrimary)
-                                }
 
-                                Button(
-                                    onClick = {
-                                        try {
-                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(forwardingActiveUrl))
-                                            context.startActivity(intent)
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "Cannot open browser", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextOnAccent, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Open", fontSize = 12.sp, color = TextOnAccent)
-                                }
-                            }
                         }
                     }
 
@@ -2635,7 +2955,16 @@ private fun ControlTab(
                     }
                 } else if (isConnecting) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = PrimaryAccent)
-                    Text("Creating public worldwide HTTPS tunnel for port $forwardedPort...", color = TextSecondary, fontSize = 12.sp)
+                    val statusText = if (forwardingActiveUrl.isNotBlank()) {
+                        "Registering with Cloudflare edge nodes... URL: $forwardingActiveUrl"
+                    } else {
+                        "Creating public worldwide HTTPS tunnel for port $forwardedPort..."
+                    }
+                    Text(statusText, color = TextSecondary, fontSize = 12.sp)
+
+                    forwardingError?.let { err ->
+                        Text(err, color = StatusOrange, fontSize = 11.sp)
+                    }
 
                     OutlinedButton(
                         onClick = { viewModel.stopPortForwarding() },
@@ -2645,6 +2974,53 @@ private fun ControlTab(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Cancel", color = StatusRed, fontWeight = FontWeight.Bold)
+                    }
+                } else if (forwardingStatus == TunnelStatus.ERROR) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = StatusRed.copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = StatusRed, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Port Forwarding Error", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Text(
+                                text = forwardingError ?: "Port forwarding connection failed. Your mobile connection may be slow or unstable.",
+                                color = TextPrimary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { viewModel.stopPortForwarding() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                            border = BorderStroke(1.dp, DarkBorder),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Dismiss", color = TextSecondary)
+                        }
+
+                        Button(
+                            onClick = {
+                                val retryPort = forwardedPort ?: project.port
+                                viewModel.startPortForwarding(retryPort)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Retry", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        }
                     }
                 } else {
                     Text("Forward any local port to a public worldwide HTTPS URL (like VS Code port forwarding) so anyone around the world can access it.", color = TextSecondary, fontSize = 12.sp)
@@ -2721,18 +3097,20 @@ private fun ControlTab(
                         border = BorderStroke(1.dp, StatusGreen.copy(alpha = 0.4f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Tunnel active via Zero Trust token",
-                                color = StatusGreen,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (tokenActiveUrl.isNotBlank()) "Tunnel active: $tokenActiveUrl" else "Tunnel active via Zero Trust token",
+                                    color = StatusGreen,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
                         }
                     }
 
@@ -2749,6 +3127,13 @@ private fun ControlTab(
                         Text("Stop Named Tunnel", color = StatusRed, fontWeight = FontWeight.Bold)
                     }
                 } else if (tokenTunnelStatus == TunnelStatus.CONNECTING) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = PrimaryAccent)
+                    Text("Connecting named tunnel to Cloudflare edge nodes...", color = TextSecondary, fontSize = 12.sp)
+
+                    tokenError?.let {
+                        Text(it, color = StatusOrange, fontSize = 11.sp)
+                    }
+
                     Button(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2760,6 +3145,56 @@ private fun ControlTab(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Cancel Connecting", color = StatusRed, fontWeight = FontWeight.Bold)
+                    }
+                } else if (tokenTunnelStatus == TunnelStatus.ERROR) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = StatusRed.copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = StatusRed, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Named Tunnel Error", color = StatusRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Text(
+                                text = tokenError ?: "Named tunnel connection failed. Mobile network may be slow or unstable.",
+                                color = TextPrimary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { viewModel.stopNamedTunnel() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                            border = BorderStroke(1.dp, DarkBorder),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Dismiss", color = TextSecondary)
+                        }
+
+                        Button(
+                            onClick = {
+                                if (namedTokenInput.isNotBlank()) {
+                                    viewModel.startNamedTunnel(namedTokenInput.trim())
+                                } else if (savedTunnelTokens.isNotEmpty()) {
+                                    viewModel.startNamedTunnel(savedTunnelTokens.first().token)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Retry", color = TextOnAccent, fontWeight = FontWeight.Bold)
+                        }
                     }
                 } else {
                     if (savedTunnelTokens.isNotEmpty()) {
@@ -2807,6 +3242,9 @@ private fun ControlTab(
                                         },
                                         onClick = {
                                             namedTokenInput = t.token
+                                            if (t.domain.isNotBlank()) {
+                                                namedDomainInput = t.domain
+                                            }
                                             tokenDropdownExpanded = false
                                         }
                                     )
@@ -2833,6 +3271,24 @@ private fun ControlTab(
                         )
                     )
 
+                    OutlinedTextField(
+                        value = namedDomainInput,
+                        onValueChange = { namedDomainInput = it },
+                        label = { Text("Enter Route (Optional)", fontSize = 12.sp) },
+                        placeholder = { Text("e.g. app.yourdomain.com", color = TextMuted, fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryAccent,
+                            unfocusedBorderColor = DarkBorderSubtle,
+                            focusedContainerColor = DarkSurfaceElevated,
+                            unfocusedContainerColor = DarkSurfaceElevated
+                        )
+                    )
+
                     Button(
                         onClick = {
                             val token = namedTokenInput.trim()
@@ -2840,7 +3296,7 @@ private fun ControlTab(
                                 Toast.makeText(context, "Please enter your Cloudflare tunnel token", Toast.LENGTH_SHORT).show()
                             } else {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.startNamedTunnel(token)
+                                viewModel.startNamedTunnel(token, namedDomainInput.trim().ifBlank { null })
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccent),
