@@ -229,6 +229,14 @@ fun FileExplorerScreen(
     val context = LocalContext.current
 
     
+    val multipleFilesPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importMultipleFiles(context, uris)
+        }
+    }
+
     val deviceFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -287,11 +295,17 @@ fun FileExplorerScreen(
                 },
                 actions = {
                     if (currentProject != null) {
+                        IconButton(onClick = { multipleFilesPickerLauncher.launch(arrayOf("*/*")) }) {
+                            Icon(Icons.Default.FileOpen, contentDescription = "Import Files / Media", tint = PrimaryAccent)
+                        }
+                        IconButton(onClick = { currentDir?.let { viewModel.downloadItem(context, it) } }) {
+                            Icon(Icons.Default.FileDownload, contentDescription = "Export Folder as ZIP", tint = PrimaryAccent)
+                        }
                         IconButton(onClick = { zipPickerLauncher.launch("*/*") }) {
-                            Icon(Icons.Default.DriveFolderUpload, contentDescription = "Import ZIP", tint = PrimaryAccent)
+                            Icon(Icons.Default.DriveFolderUpload, contentDescription = "Import ZIP", tint = TextSecondary)
                         }
                         IconButton(onClick = { showVcsSheet = true }) {
-                            Icon(Icons.Default.History, contentDescription = "Version Control", tint = PrimaryAccent)
+                            Icon(Icons.Default.History, contentDescription = "Version Control", tint = TextSecondary)
                         }
                     }
                 },
@@ -301,6 +315,15 @@ fun FileExplorerScreen(
         floatingActionButton = {
             if (currentProject != null && !isLandscape) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FloatingActionButton(
+                        onClick = { multipleFilesPickerLauncher.launch(arrayOf("*/*")) },
+                        containerColor = DarkSurfaceElevated,
+                        contentColor = PrimaryAccent,
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Default.FileOpen, contentDescription = "Import Media / Files")
+                    }
+
                     FloatingActionButton(
                         onClick = {
                             isCreatingFolder = true
@@ -408,6 +431,28 @@ fun FileExplorerScreen(
                                 Icon(Icons.Default.Add, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("File", color = TextPrimary, fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { multipleFilesPickerLauncher.launch(arrayOf("*/*")) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.FileOpen, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Import", color = PrimaryAccent, fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { currentDir?.let { viewModel.downloadItem(context, it) } },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, DarkBorderSubtle),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.FileDownload, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Export", color = TextPrimary, fontSize = 12.sp)
                             }
                         }
 
@@ -518,6 +563,63 @@ fun FileExplorerScreen(
                             onPaste = { viewModel.pasteToCurrentDir() },
                             onClear = { viewModel.clearClipboard() }
                         )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = PrimaryAccentContainer,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, PrimaryAccent.copy(alpha = 0.5f)),
+                            modifier = Modifier.clickable { multipleFilesPickerLauncher.launch(arrayOf("*/*")) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.FileOpen, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(15.dp))
+                                Text("Import Files / Media", color = PrimaryAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        Surface(
+                            color = DarkSurfaceElevated,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier.clickable { currentDir?.let { viewModel.downloadItem(context, it) } }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.FileDownload, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(15.dp))
+                                Text("Export Folder (ZIP)", color = TextPrimary, fontSize = 11.sp)
+                            }
+                        }
+
+                        Surface(
+                            color = DarkSurfaceElevated,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, DarkBorderSubtle),
+                            modifier = Modifier.clickable { zipPickerLauncher.launch("*/*") }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.DriveFolderUpload, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp))
+                                Text("Import ZIP", color = TextSecondary, fontSize = 11.sp)
+                            }
+                        }
                     }
 
                     FileListContent(
@@ -1369,6 +1471,14 @@ private fun FileListContent(
                                         onClick = {
                                             menuExpanded = false
                                             onRenameClick(fileItem)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(if (fileItem.isDirectory) "Export to Downloads (ZIP)" else "Export to Downloads", color = TextPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = PrimaryAccent, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onDownloadClick(fileItem)
                                         }
                                     )
                                     DropdownMenuItem(

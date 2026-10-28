@@ -825,7 +825,7 @@ private fun AboutSection() {
                     color = PrimaryAccentContainer,
                     border = BorderStroke(1.dp, PrimaryAccent)
                 ) {
-                    Text("v1.0.6", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    Text("v1.0.7", color = PrimaryAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
             }
 
@@ -899,7 +899,7 @@ private fun AboutSection() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Latest Changes in v1.0.6", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                Text("Latest Changes in v1.0.7", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
                 Icon(
                     if (showChangelog) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
@@ -917,12 +917,12 @@ private fun AboutSection() {
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         val changelogItems = listOf(
-                            "Automatic Named Tunnel Route Discovery: Automatically extracts public routes and hostnames from Cloudflare Edge ingress logs without requiring manual domain configuration.",
-                            "Optional Route Parameter: Updated public hostname configuration field and dialog across Settings and Dashboard to 'Enter Route (Optional)'.",
-                            "Dashboard Forwarding QR & Direct Action Bar: Fixed QR code popup dialog on port forwards in portrait orientation, and redesigned action controls (Copy, QR, Open) with dedicated full-width buttons to prevent text clipping.",
-                            "Settings Tab Streamlining: Removed duplicate forward actions from project settings tab, consolidating all quick-access actions (Copy, QR, Open) on the Project Dashboard.",
-                            "Stack Selection & Top Bar Clean-up: Reordered runtime presets in project creation (Static HTML/JS, PHP, Node.js, Java, Python) and removed redundant top-bar import buttons.",
-                            "Light Theme Visibility: Enhanced navigation bar and action button contrast across Project Settings and Database controls in light mode."
+                            "Native PHP Execution & JSON Streaming: Registered php://input stream wrapper, configured DOCUMENT_ROOT, SCRIPT_FILENAME, and isolated .tmp directories; added automatic JSON body parsing into \$_POST and \$_REQUEST for fetch/AJAX game states.",
+                            "Multi-File Media & Asset Import: Added multi-document file picker in File Explorer supporting simultaneous images, audio, video, and code uploads with dedicated quick-action bars and FAB.",
+                            "Scoped Storage Downloads: Re-engineered file and directory ZIP export to utilize MediaStore.Downloads and ContentResolver on Android 10+, directly saving exports into the device's public Downloads directory.",
+                            "Android Interpreter Shebang Fixes: Resolved 'No such file or directory' errors when executing npm, npx, and pip freeze by running scripts directly through node and python interpreters.",
+                            "PHP Shutdown Handler & Error Logging: Added register_shutdown_function to cleanly output status headers and captured output on exit()/die(), and routed runtime stderr into project logs with 500 error reporting.",
+                            "Database Runner & CLI Enhancements: Injected PHP library paths into Composer, added npx command support, and enhanced MariaDB runner with dynamic multi-version Python binary discovery."
                         )
                         changelogItems.forEach { item ->
                             Row(

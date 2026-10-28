@@ -25,10 +25,18 @@ class DatabaseClient @Inject constructor(
 
     private fun executeQueryRunner(payload: JSONObject): JSONObject? {
         return try {
-            val pythonBin = File(context.filesDir, "runtimes/python/bin/python3")
+            val pythonBin = listOf(
+                File(context.filesDir, "runtimes/python/bin/python3"),
+                File(context.filesDir, "runtimes/python/bin/python3.14"),
+                File(context.filesDir, "runtimes/python/bin/python")
+            ).firstOrNull { it.exists() && it.canExecute() } ?: listOf(
+                File(context.filesDir, "runtimes/python/bin/python3"),
+                File(context.filesDir, "runtimes/python/bin/python3.14"),
+                File(context.filesDir, "runtimes/python/bin/python")
+            ).firstOrNull { it.exists() } ?: return null
+
             val mariadbDir = File(context.filesDir, "runtimes/mariadb").apply { mkdirs() }
             val queryScript = File(mariadbDir, "db_query.py")
-            if (!pythonBin.exists()) return null
             val decoded = String(Base64.decode(scriptB64, Base64.DEFAULT), StandardCharsets.UTF_8)
             if (!queryScript.exists() || queryScript.readText() != decoded) {
                 queryScript.writeText(decoded)
@@ -38,7 +46,7 @@ class DatabaseClient @Inject constructor(
             val pb = ProcessBuilder(pythonBin.absolutePath, queryScript.absolutePath)
             val env = pb.environment()
             env["LD_LIBRARY_PATH"] = "${context.filesDir.absolutePath}/runtimes/python/lib:${context.filesDir.absolutePath}/runtimes/mariadb/lib"
-            env["PYTHONPATH"] = "${context.filesDir.absolutePath}/runtimes/python/lib/python3.14/site-packages"
+            env["PYTHONPATH"] = "${context.filesDir.absolutePath}/runtimes/python/lib/python3.14/site-packages:${context.filesDir.absolutePath}/runtimes/python/lib/python3.12/site-packages"
             val proc = pb.start()
             proc.outputStream.bufferedWriter().use { writer ->
                 writer.write(payload.toString())

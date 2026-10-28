@@ -175,6 +175,7 @@ class LocalhostCli @Inject constructor(
                 "pip", "pip3" -> handleRuntimeExec(RuntimeType.PYTHON, listOf("-m", "pip") + args, onOutputChunk)
                 "node" -> handleRuntimeExec(RuntimeType.NODEJS, args, onOutputChunk)
                 "npm" -> handleRuntimeExec(RuntimeType.NODEJS, listOf("npm") + args, onOutputChunk)
+                "npx" -> handleRuntimeExec(RuntimeType.NODEJS, listOf("npx") + args, onOutputChunk)
                 "php" -> handleRuntimeExec(RuntimeType.PHP, args, onOutputChunk)
                 "exec" -> handleCustomExec(args, onOutputChunk)
                 else -> handleFallbackExec(root, args, onOutputChunk)
@@ -610,19 +611,24 @@ Filesystem      Size  Used  Avail Use% Mounted on
         onOutputChunk: ((String) -> Unit)? = null
     ): String {
         val venvPython = if (runtime == RuntimeType.PYTHON) {
-            activeVenvDir?.let { File(it, "bin/python") }?.takeIf { it.exists() } ?: listOf(
+            activeVenvDir?.let { File(it, "bin/python") }?.takeIf { it.exists() && it.canExecute() } ?: listOf(
                 File(currentDirectory, "myenv/bin/python"),
                 File(currentDirectory, ".venv/bin/python"),
                 File(currentDirectory, "venv/bin/python")
-            ).firstOrNull { it.exists() }
+            ).firstOrNull { it.exists() && it.canExecute() }
         } else null
 
         val execPath = venvPython?.absolutePath ?: runtimeManager.getExecutablePath(runtime)
             ?: return "${runtime.displayName} runtime is not installed. Download it from Settings."
         val env = getDefaultTerminalEnvironment(runtime)
-        val fullCmd = if (args.firstOrNull() == "npm") {
-            val npmFile = File(File(execPath).parentFile, "npm")
-            listOf(npmFile.absolutePath) + args.drop(1)
+        val firstArg = args.firstOrNull()
+        val fullCmd = if (firstArg == "npm" || firstArg == "npx") {
+            val toolFile = File(File(execPath).parentFile, firstArg)
+            if (toolFile.exists()) {
+                listOf(execPath, toolFile.absolutePath) + args.drop(1)
+            } else {
+                listOf(firstArg) + args.drop(1)
+            }
         } else {
             listOf(execPath) + args
         }
@@ -1020,6 +1026,7 @@ Localhost CLI Commands:
         if (!composerPhar.exists()) {
             return "composer: composer.phar not found. Download Composer from Settings or use composer download."
         }
-        return handleCustomExec(listOf(phpPath, composerPhar.absolutePath) + args, onOutputChunk)
+        val phpEnv = getDefaultTerminalEnvironment(RuntimeType.PHP)
+        return runProcess(listOf(phpPath, composerPhar.absolutePath) + args, currentDirectory, phpEnv, onOutputChunk)
     }
 }

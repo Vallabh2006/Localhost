@@ -973,9 +973,15 @@ class ProjectsViewModel @Inject constructor(
                     baseCmd
                 }
                 RuntimeType.NODEJS -> {
-                    val npmPath = File(File(execPath).parentFile, "npm").takeIf { it.exists() }?.absolutePath ?: "npm"
-                    if (isCustom) listOf(npmPath, "install", packageName.trim())
-                    else listOf(npmPath, "install")
+                    val npmFile = File(File(execPath).parentFile, "npm")
+                    if (npmFile.exists()) {
+                        if (isCustom) listOf(execPath, npmFile.absolutePath, "install", packageName.trim())
+                        else listOf(execPath, npmFile.absolutePath, "install")
+                    } else {
+                        val npmPath = "npm"
+                        if (isCustom) listOf(npmPath, "install", packageName.trim())
+                        else listOf(npmPath, "install")
+                    }
                 }
                 RuntimeType.PHP -> {
                     if (!composerManager.isInstalled()) {
@@ -1069,8 +1075,12 @@ class ProjectsViewModel @Inject constructor(
             val cmd = when (project.runtime) {
                 RuntimeType.PYTHON -> listOf(execPath, "-m", "pip", "uninstall", "-y", packageName.trim())
                 RuntimeType.NODEJS -> {
-                    val npmPath = File(File(execPath).parentFile, "npm").takeIf { it.exists() }?.absolutePath ?: "npm"
-                    listOf(npmPath, "uninstall", packageName.trim())
+                    val npmFile = File(File(execPath).parentFile, "npm")
+                    if (npmFile.exists()) {
+                        listOf(execPath, npmFile.absolutePath, "uninstall", packageName.trim())
+                    } else {
+                        listOf("npm", "uninstall", packageName.trim())
+                    }
                 }
                 RuntimeType.PHP -> {
                     val composerPhar = composerManager.composerFile
@@ -1401,11 +1411,11 @@ class ProjectsViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             _message.value = "Freezing requirements into $fileName..."
             val workDir = File(project.workingDir)
-            val venvPip = File(workDir, ".venv/bin/pip")
-            val pyPip = if (venvPip.exists()) venvPip.absolutePath else (runtimeManager.getExecutablePath(com.localhost.core.model.RuntimeType.PYTHON)?.let { File(File(it).parentFile, "pip").absolutePath } ?: "pip")
+            val venvPy = File(workDir, ".venv/bin/python")
+            val execPath = if (venvPy.exists() && venvPy.canExecute()) venvPy.absolutePath else (runtimeManager.getExecutablePath(com.localhost.core.model.RuntimeType.PYTHON) ?: "python")
             try {
                 val env = runtimeManager.getEnvironmentForRuntime(com.localhost.core.model.RuntimeType.PYTHON)
-                val pb = ProcessBuilder(pyPip, "freeze")
+                val pb = ProcessBuilder(listOf(execPath, "-m", "pip", "freeze"))
                 pb.directory(workDir)
                 pb.environment().putAll(env)
                 val proc = pb.start()

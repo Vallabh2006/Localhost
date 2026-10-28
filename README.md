@@ -172,6 +172,26 @@ Localhost/
 
 ---
 
+## Changes in Version 1.0.7
+
+- Native PHP Execution & JSON Streaming: Registered `php://input` stream wrapper, configured `$_SERVER['DOCUMENT_ROOT']`, `SCRIPT_FILENAME`, and isolated `.tmp` directory; added automatic JSON decode into `$_POST` and `$_REQUEST` for fetch/AJAX game states and single-page apps.
+- Multi-File Media & Asset Import: Added batch media/file importer supporting simultaneous images, audio, video, and code uploads with dedicated quick-access toolbars, landscape action rows, and floating action button.
+- Scoped Storage Downloads: Re-engineered file and directory ZIP export to utilize `MediaStore.Downloads` and Android `ContentResolver` on Android 10+, directly saving exports into the device's public Downloads directory without permission issues.
+- Android Interpreter Shebang Fixes: Resolved "No such file or directory" (`error=2`) crashes when executing `npm`, `npx`, and `pip freeze` by running scripts directly through the `node` and `python` interpreters.
+- PHP Shutdown Handler & Error Logging: Added `register_shutdown_function()` to cleanly output status headers and captured output on `exit()` or `die()`, and routed runtime stderr into project logs with HTTP 500 error reporting.
+- Database Runner & CLI Enhancements: Injected PHP library paths into Composer execution, added `npx` command support, and enhanced MariaDB runner with dynamic multi-version Python binary discovery.
+
+## Changes in Version 1.0.6
+
+- Automatic Named Tunnel Route Discovery: Automatically extracts public routes and hostnames from Cloudflare Edge ingress logs without requiring manual domain configuration.
+- Optional Route Parameter: Updated public hostname configuration field and dialog across Settings and Dashboard to "Enter Route (Optional)".
+- Dashboard Forwarding QR & Direct Action Bar: Fixed QR code popup dialog on port forwards in portrait orientation, and redesigned action controls (Copy, QR, Open) with dedicated full-width buttons to prevent text clipping.
+- Settings Tab Streamlining: Removed duplicate forward actions from project settings tab, consolidating all quick-access actions (Copy, QR, Open) on the Project Dashboard.
+- Stack Selection & Top Bar Clean-up: Reordered runtime presets in project creation (Static HTML/JS, PHP, Node.js, Java, Python) and removed redundant top-bar import buttons.
+- Light Theme Visibility: Enhanced navigation bar and action button contrast across Project Settings and Database controls in light mode.
+
+---
+
 ## Changes in Version 1.0.5
 
 - Interactive Database CLI Terminal: Added a full-featured interactive MariaDB CLI terminal tab supporting standard SQL commands (`SHOW DATABASES;`, `SHOW TABLES;`, `DESCRIBE <table>;`, `SELECT ...;`, `USE <db>;`, `STATUS;`, `clear`, `help`). Features clean ASCII grid-table formatting for query results (`+----+----+`) with timing and rows affected, command history navigation with `↑` and `↓` buttons, quick accessory keys, and click-to-copy output.

@@ -445,11 +445,12 @@ class DashboardServer @Inject constructor(
                                 }
                             }
                             RuntimeType.NODEJS -> {
-                                val npmPath = File(File(execPath).parentFile, "npm").takeIf { it.exists() }?.absolutePath ?: "npm"
+                                val npmFile = File(File(execPath).parentFile, "npm")
+                                val npmBase = if (npmFile.exists()) listOf(execPath, npmFile.absolutePath) else listOf("npm")
                                 if (req.installAll || req.packageName.isBlank()) {
-                                    listOf(npmPath, "install")
+                                    npmBase + "install"
                                 } else {
-                                    listOf(npmPath, "install", req.packageName.trim())
+                                    npmBase + listOf("install", req.packageName.trim())
                                 }
                             }
                             else -> null

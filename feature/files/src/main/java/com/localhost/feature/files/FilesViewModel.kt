@@ -9,6 +9,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import androidx.lifecycle.ViewModel
@@ -283,38 +286,87 @@ class FilesViewModel @Inject constructor(
     fun downloadItem(context: Context, file: File) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).let {
-                    if (!it.exists()) it.mkdirs()
-                    if (it.canWrite()) it else File("/sdcard/Download").let { sd ->
-                        if (!sd.exists()) sd.mkdirs()
-                        if (sd.canWrite()) sd else context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                val isDir = file.isDirectory
+                val extension = if (isDir) "zip" else file.extension
+                val baseName = if (isDir) file.name else file.nameWithoutExtension
+                val fileName = if (extension.isNotEmpty()) "$baseName.$extension" else baseName
+                val mimeType = if (isDir) "application/zip" else when (extension.lowercase()) {
+                    "jpg", "jpeg" -> "image/jpeg"
+                    "png" -> "image/png"
+                    "webp" -> "image/webp"
+                    "gif" -> "image/gif"
+                    "svg" -> "image/svg+xml"
+                    "mp4" -> "video/mp4"
+                    "mp3" -> "audio/mpeg"
+                    "pdf" -> "application/pdf"
+                    "json" -> "application/json"
+                    "html", "htm" -> "text/html"
+                    "txt", "md", "log" -> "text/plain"
+                    "zip" -> "application/zip"
+                    else -> "application/octet-stream"
+                }
+
+                if (isDir) {
+                    _message.value = "Zipping '${file.name}'..."
+                }
+
+                var saved = false
+                var savedName = fileName
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        val resolver = context.contentResolver
+                        val contentValues = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                        if (uri != null) {
+                            resolver.openOutputStream(uri)?.use { os ->
+                                if (isDir) {
+                                    FileUtils.zipDirectory(file, os)
+                                } else {
+                                    file.inputStream().use { it.copyTo(os) }
+                                }
+                            }
+                            contentValues.clear()
+                            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                            resolver.update(uri, contentValues, null, null)
+                            saved = true
+                        }
+                    } catch (_: Exception) {
+                        saved = false
                     }
                 }
 
-                if (file.isDirectory) {
-                    _message.value = "Zipping '${file.name}'..."
-                    var targetZip = File(downloadsDir, "${file.name}.zip")
-                    var idx = 1
-                    while (targetZip.exists()) {
-                        targetZip = File(downloadsDir, "${file.name}_$idx.zip")
-                        idx++
+                if (!saved) {
+                    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).let {
+                        if (!it.exists()) it.mkdirs()
+                        if (it.canWrite()) it else File("/sdcard/Download").let { sd ->
+                            if (!sd.exists()) sd.mkdirs()
+                            if (sd.canWrite()) sd else context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                        }
                     }
-                    FileOutputStream(targetZip).use { fos ->
-                        FileUtils.zipDirectory(file, fos)
-                    }
-                    _message.value = "Saved '${targetZip.name}' to Downloads folder (${formatFileSize(targetZip.length())})"
-                } else {
-                    var targetFile = File(downloadsDir, file.name)
+                    var targetFile = File(downloadsDir, fileName)
                     var idx = 1
-                    val baseName = file.nameWithoutExtension
-                    val ext = if (file.extension.isNotEmpty()) ".${file.extension}" else ""
+                    val ext = if (extension.isNotEmpty()) ".$extension" else ""
                     while (targetFile.exists()) {
                         targetFile = File(downloadsDir, "${baseName}_$idx$ext")
                         idx++
                     }
-                    file.copyTo(targetFile, overwrite = true)
-                    _message.value = "Saved '${targetFile.name}' to Downloads folder (${formatFileSize(targetFile.length())})"
+                    savedName = targetFile.name
+                    FileOutputStream(targetFile).use { fos ->
+                        if (isDir) {
+                            FileUtils.zipDirectory(file, fos)
+                        } else {
+                            file.inputStream().use { it.copyTo(fos) }
+                        }
+                    }
                 }
+
+                _message.value = "Saved '$savedName' to Downloads folder"
             } catch (e: Exception) {
                 _message.value = "Download failed: ${e.message}"
             }
@@ -628,24 +680,40 @@ class FilesViewModel @Inject constructor(
     }
 
     fun importFileFromDevice(context: Context, uri: Uri) {
+        importMultipleFiles(context, listOf(uri))
+    }
+
+    fun importMultipleFiles(context: Context, uris: List<Uri>) {
         val currentDir = _currentDir.value ?: return
+        if (uris.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                var fileName = "imported_file"
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (nameIdx != -1 && cursor.moveToFirst()) {
-                        fileName = cursor.getString(nameIdx)
+                var count = 0
+                val names = mutableListOf<String>()
+                for (uri in uris) {
+                    var fileName = "imported_file_${System.currentTimeMillis()}"
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (nameIdx != -1 && cursor.moveToFirst()) {
+                            val name = cursor.getString(nameIdx)
+                            if (!name.isNullOrBlank()) fileName = name
+                        }
                     }
-                }
-                val destFile = File(currentDir, fileName)
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        input.copyTo(output)
+                    val destFile = File(currentDir, fileName)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(destFile).use { output ->
+                            input.copyTo(output)
+                        }
                     }
+                    names.add(fileName)
+                    count++
                 }
                 loadFiles(currentDir)
-                _message.value = "Imported $fileName (${formatFileSize(destFile.length())})"
+                if (count == 1) {
+                    _message.value = "Imported ${names.first()}"
+                } else {
+                    _message.value = "Imported $count files"
+                }
             } catch (e: Exception) {
                 _message.value = "Import failed: ${e.message}"
             }
